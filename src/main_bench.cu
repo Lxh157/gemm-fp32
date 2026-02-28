@@ -1,7 +1,7 @@
 #include "utils.cuh"
 
 #include <cuda_runtime.h>
-
+#include <cuda_fp16.h>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -27,8 +27,17 @@ void launch_gemm_cublas_rowmajor(const float* A, const float* B, float* C,
                           int M, int N, int K, cudaStream_t stream);
 // 来自 cublaslt_baseline.cu 的声明
 void launch_gemm_cublaslt_rowmajor(const float* A, const float* B, float* C,
-                          int M, int N, int K, cudaStream_t stream);  
-// 非严格参数解析（Day 1 够用）
+                          int M, int N, int K, cudaStream_t stream); 
+// 来自 gemm_tiled_fp16acc.cu 的声明
+void launch_gemm_tiled_fp16acc(const half* dA, const half* dB, float* dC,
+                          int M, int N, int K, cudaStream_t stream);
+// 来自 gemm_tiled_fp16acc_rb1x4.cu 的声明
+void launch_gemm_tiled_fp16acc_rb1x4(const half* dA, const half* dB, float* dC,
+                          int M, int N, int K, cudaStream_t stream);
+// 来自 gemm_tiled_fp16acc_rb2x4.cu 的声明
+void launch_gemm_tiled_fp16acc_rb2x4(const half* dA, const half* dB, float* dC,
+                          int M, int N, int K, cudaStream_t stream);
+// 非严格参数解析
 // 支持：
 //   ./bench_gemm
 //   ./bench_gemm 1024 1024 1024
@@ -90,9 +99,9 @@ Args parse_args(int argc, char** argv) {
     } else if (s == "--impl") {
         need_value(i);
         a.impl = argv[++i];
-        if (a.impl != "naive" && a.impl != "tiled" && a.impl != "tiled_rb1x4" && a.impl != "tiled_rb2x4" && a.impl != "cublas" && a.impl != "cublaslt") {
+        if (a.impl != "naive" && a.impl != "tiled" && a.impl != "tiled_rb1x4" && a.impl != "tiled_rb2x4" && a.impl != "cublas" && a.impl != "cublaslt" && a.impl != "tiled_fp16acc" && a.impl != "tiled_fp16acc_rb1x4" && a.impl != "tiled_fp16acc_rb2x4") {
           std::cerr << "Invalid --impl: " << a.impl
-                    << " (expected naive, tiled, tiled_rb1x4, tiled_rb2x4, cublas, or cublaslt)" << std::endl;
+                    << " (expected naive, tiled, tiled_rb1x4, tiled_rb2x4, tiled_fp16acc, tiled_fp16acc_rb1x4, tiled_fp16acc_rb2x4, cublas, or cublaslt)" << std::endl;
           std::exit(EXIT_FAILURE);
         }
     } else {
@@ -134,23 +143,53 @@ int main(int argc, char** argv) {
     cpu_gemm_ref(hA.data(), hB.data(), hC_ref.data(), M, N, K);
   }
 
+  bool use_fp16_inputs = (args.impl == "tiled_fp16acc" ||
+                          args.impl == "tiled_fp16acc_rb1x4" ||
+                          args.impl == "tiled_fp16acc_rb2x4");
+
   // Device buffers
   float *dA = nullptr, *dB = nullptr, *dC = nullptr;
+  half  *dA16 = nullptr, *dB16 = nullptr;
+
   size_t bytesA = static_cast<size_t>(M) * K * sizeof(float);
   size_t bytesB = static_cast<size_t>(K) * N * sizeof(float);
   size_t bytesC = static_cast<size_t>(M) * N * sizeof(float);
 
-  CHECK_CUDA(cudaMalloc(&dA, bytesA));
-  CHECK_CUDA(cudaMalloc(&dB, bytesB));
-  CHECK_CUDA(cudaMalloc(&dC, bytesC));
+  size_t bytesA16 = static_cast<size_t>(M) * K * sizeof(half);
+  size_t bytesB16 = static_cast<size_t>(K) * N * sizeof(half);
 
-  CHECK_CUDA(cudaMemcpy(dA, hA.data(), bytesA, cudaMemcpyHostToDevice));
-  CHECK_CUDA(cudaMemcpy(dB, hB.data(), bytesB, cudaMemcpyHostToDevice));
-  CHECK_CUDA(cudaMemset(dC, 0, bytesC));
+  if (use_fp16_inputs) {
+    std::vector<half> hA16(static_cast<size_t>(M) * K);
+    std::vector<half> hB16(static_cast<size_t>(K) * N);
+
+    for (size_t i = 0; i < hA.size(); ++i) {
+      hA16[i] = __float2half(hA[i]);
+    }
+    for (size_t i = 0; i < hB.size(); ++i) {
+      hB16[i] = __float2half(hB[i]);
+    }
+
+    CHECK_CUDA(cudaMalloc(&dA16, bytesA16));
+    CHECK_CUDA(cudaMalloc(&dB16, bytesB16));
+    CHECK_CUDA(cudaMalloc(&dC, bytesC));
+
+    CHECK_CUDA(cudaMemcpy(dA16, hA16.data(), bytesA16, cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(dB16, hB16.data(), bytesB16, cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemset(dC, 0, bytesC));
+  } else {
+    CHECK_CUDA(cudaMalloc(&dA, bytesA));
+    CHECK_CUDA(cudaMalloc(&dB, bytesB));
+    CHECK_CUDA(cudaMalloc(&dC, bytesC));
+
+    CHECK_CUDA(cudaMemcpy(dA, hA.data(), bytesA, cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(dB, hB.data(), bytesB, cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemset(dC, 0, bytesC));
+  }
+
   cudaStream_t stream;
   CHECK_CUDA(cudaStreamCreate(&stream));
 
-    // launcher 分发函数
+  // launcher 分发函数
   auto launch_selected = [&](cudaStream_t stream) {
     if (args.impl == "naive") {
       launch_gemm_naive(dA, dB, dC, M, N, K, stream);
@@ -164,6 +203,12 @@ int main(int argc, char** argv) {
       launch_gemm_cublas_rowmajor(dA, dB, dC, M, N, K, stream);
     } else if (args.impl == "cublaslt") {
       launch_gemm_cublaslt_rowmajor(dA, dB, dC, M, N, K, stream);
+    } else if (args.impl == "tiled_fp16acc") {
+      launch_gemm_tiled_fp16acc(dA16, dB16, dC, M, N, K, stream);
+    } else if (args.impl == "tiled_fp16acc_rb1x4") {
+      launch_gemm_tiled_fp16acc_rb1x4(dA16, dB16, dC, M, N, K, stream);
+    } else if (args.impl == "tiled_fp16acc_rb2x4") {
+      launch_gemm_tiled_fp16acc_rb2x4(dA16, dB16, dC, M, N, K, stream);
     } else {
       std::cerr << "Unknown impl: " << args.impl << std::endl;
       std::exit(EXIT_FAILURE);
@@ -177,7 +222,10 @@ int main(int argc, char** argv) {
     CHECK_CUDA(cudaDeviceSynchronize());
 
     CHECK_CUDA(cudaMemcpy(hC.data(), dC, bytesC, cudaMemcpyDeviceToHost));
-    auto chk = check_allclose(hC, hC_ref, 1e-3f, 1e-3f);
+
+    float atol = use_fp16_inputs ? 2e-2f : 1e-3f;
+    float rtol = use_fp16_inputs ? 2e-2f : 1e-3f;
+    auto chk = check_allclose(hC, hC_ref, atol, rtol);
 
     if (!chk.ok) {
       std::cerr << "[check] FAILED"
@@ -185,9 +233,13 @@ int main(int argc, char** argv) {
                 << " idx=" << chk.max_idx
                 << " got=" << chk.got
                 << " ref=" << chk.ref << std::endl;
-      CHECK_CUDA(cudaFree(dA));
-      CHECK_CUDA(cudaFree(dB));
-      CHECK_CUDA(cudaFree(dC));
+
+      if (dA)   CHECK_CUDA(cudaFree(dA));
+      if (dB)   CHECK_CUDA(cudaFree(dB));
+      if (dA16) CHECK_CUDA(cudaFree(dA16));
+      if (dB16) CHECK_CUDA(cudaFree(dB16));
+      if (dC)   CHECK_CUDA(cudaFree(dC));
+      CHECK_CUDA(cudaStreamDestroy(stream));
       return EXIT_FAILURE;
     } else {
       std::cout << "[check] PASS"
@@ -232,9 +284,13 @@ int main(int argc, char** argv) {
 
   CHECK_CUDA(cudaEventDestroy(start));
   CHECK_CUDA(cudaEventDestroy(stop));
-  CHECK_CUDA(cudaFree(dA));
-  CHECK_CUDA(cudaFree(dB));
-  CHECK_CUDA(cudaFree(dC));
+
+  if (dA)   CHECK_CUDA(cudaFree(dA));
+  if (dB)   CHECK_CUDA(cudaFree(dB));
+  if (dA16) CHECK_CUDA(cudaFree(dA16));
+  if (dB16) CHECK_CUDA(cudaFree(dB16));
+  if (dC)   CHECK_CUDA(cudaFree(dC));
+
   CHECK_CUDA(cudaStreamDestroy(stream));
 
   return 0;

@@ -15,8 +15,8 @@ WARMUP="${WARMUP:-3}"
 REPEAT="${REPEAT:-10}"
 
 # 先做最小闭环：9个点
-SIZES=(256 512 1024)
-IMPLS=(naive tiled tiled_rb1x4 tiled_rb2x4 cublas cublaslt)
+SIZES=(${SIZES_OVERRIDE:-256 512 1024})
+IMPLS=(naive tiled tiled_rb1x4 tiled_rb2x4 tiled_fp16acc tiled_fp16acc_rb1x4 tiled_fp16acc_rb2x4 cublas cublaslt)
 
 mkdir -p "${OUT_DIR}" "${LOG_DIR}"
 
