@@ -57,6 +57,7 @@ FP16_IMPLS = [
     "wmma_fp16acc",
     "wmma_fp16acc_staged",
     "wmma_fp16acc_staged_db",
+    "wmma_fp16acc_staged_cpasync",
     "cublas_gemmex_fp16acc",
     "cublaslt_fp16acc",
 ]
