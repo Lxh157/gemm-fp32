@@ -37,6 +37,15 @@ void launch_gemm_tiled_fp16acc_rb1x4(const half* dA, const half* dB, float* dC,
 // 来自 gemm_tiled_fp16acc_rb2x4.cu 的声明
 void launch_gemm_tiled_fp16acc_rb2x4(const half* dA, const half* dB, float* dC,
                           int M, int N, int K, cudaStream_t stream);
+// 来自 gemm_wmma_fp16acc.cu 的声明
+void launch_gemm_wmma_fp16acc(const half* dA, const half* dB, float* dC,
+                          int M, int N, int K, cudaStream_t stream);
+// 来自 gemm_cublas_gemmex_fp16acc.cu 的声明
+void launch_gemm_cublas_gemmex_fp16acc_rowmajor(const half* A, const half* B, float* C,
+                          int M, int N, int K, cudaStream_t stream);
+// 来自 gemm_cublaslt_fp16acc.cu 的声明
+void launch_gemm_cublaslt_fp16acc_rowmajor(const half* A, const half* B, float* C,
+                          int M, int N, int K, cudaStream_t stream);
 // 非严格参数解析
 // 支持：
 //   ./bench_gemm
@@ -99,9 +108,9 @@ Args parse_args(int argc, char** argv) {
     } else if (s == "--impl") {
         need_value(i);
         a.impl = argv[++i];
-        if (a.impl != "naive" && a.impl != "tiled" && a.impl != "tiled_rb1x4" && a.impl != "tiled_rb2x4" && a.impl != "cublas" && a.impl != "cublaslt" && a.impl != "tiled_fp16acc" && a.impl != "tiled_fp16acc_rb1x4" && a.impl != "tiled_fp16acc_rb2x4") {
+        if (a.impl != "naive" && a.impl != "tiled" && a.impl != "tiled_rb1x4" && a.impl != "tiled_rb2x4" && a.impl != "cublas" && a.impl != "cublaslt" && a.impl != "tiled_fp16acc" && a.impl != "tiled_fp16acc_rb1x4" && a.impl != "tiled_fp16acc_rb2x4" && a.impl != "wmma_fp16acc" && a.impl != "cublas_gemmex_fp16acc" && a.impl != "cublaslt_fp16acc") {
           std::cerr << "Invalid --impl: " << a.impl
-                    << " (expected naive, tiled, tiled_rb1x4, tiled_rb2x4, tiled_fp16acc, tiled_fp16acc_rb1x4, tiled_fp16acc_rb2x4, cublas, or cublaslt)" << std::endl;
+                    << " (expected naive, tiled, tiled_rb1x4, tiled_rb2x4, cublas, cublaslt, tiled_fp16acc, tiled_fp16acc_rb1x4, tiled_fp16acc_rb2x4, wmma_fp16acc, cublas_gemmex_fp16acc, or cublaslt_fp16acc)" << std::endl;
           std::exit(EXIT_FAILURE);
         }
     } else {
@@ -145,7 +154,10 @@ int main(int argc, char** argv) {
 
   bool use_fp16_inputs = (args.impl == "tiled_fp16acc" ||
                           args.impl == "tiled_fp16acc_rb1x4" ||
-                          args.impl == "tiled_fp16acc_rb2x4");
+                          args.impl == "tiled_fp16acc_rb2x4"||
+                          args.impl == "wmma_fp16acc" ||
+                          args.impl == "cublas_gemmex_fp16acc" ||
+                          args.impl == "cublaslt_fp16acc");
 
   // Device buffers
   float *dA = nullptr, *dB = nullptr, *dC = nullptr;
@@ -209,6 +221,12 @@ int main(int argc, char** argv) {
       launch_gemm_tiled_fp16acc_rb1x4(dA16, dB16, dC, M, N, K, stream);
     } else if (args.impl == "tiled_fp16acc_rb2x4") {
       launch_gemm_tiled_fp16acc_rb2x4(dA16, dB16, dC, M, N, K, stream);
+    } else if (args.impl == "wmma_fp16acc") {
+      launch_gemm_wmma_fp16acc(dA16, dB16, dC, M, N, K, stream);
+    } else if (args.impl == "cublas_gemmex_fp16acc") {
+      launch_gemm_cublas_gemmex_fp16acc_rowmajor(dA16, dB16, dC, M, N, K, stream);
+    } else if (args.impl == "cublaslt_fp16acc") {
+      launch_gemm_cublaslt_fp16acc_rowmajor(dA16, dB16, dC, M, N, K, stream);
     } else {
       std::cerr << "Unknown impl: " << args.impl << std::endl;
       std::exit(EXIT_FAILURE);

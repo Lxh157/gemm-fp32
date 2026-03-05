@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 import re
-import glob
-import os
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 
-# 自动选择 results/raw/ 下最新的 bench_fp32_*.txt
-RAW_DIR = Path("results/raw/")
+# 运行脚本：python3 scripts/plot.py
+
+RAW_DIR = Path("results/raw")
 candidates = sorted(RAW_DIR.glob("bench_fp32_*.txt"))
 if not candidates:
     raise FileNotFoundError("No results/raw/bench_fp32_*.txt found. Run scripts/run_bench.sh first.")
@@ -16,8 +15,10 @@ INPUT = candidates[-1]
 OUT_DIR = Path("results/plots")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# 解析：抓 impl 和 M=N=K 和 perf median GFLOP/s
-pat_case = re.compile(r"===== impl=(\w+), M=N=K=(\d+) =====")
+# 解析：
+# ===== impl=xxx, M=N=K=1024 =====
+# [perf] median=1234.567 GFLOP/s
+pat_case = re.compile(r"===== impl=([\w_]+), M=N=K=(\d+) =====")
 pat_perf = re.compile(r"\[perf\]\s+median=([0-9.]+)\s+GFLOP/s")
 
 data = {}  # impl -> size -> gflops
@@ -32,6 +33,7 @@ with open(INPUT, "r", encoding="utf-8", errors="ignore") as f:
             cur_size = int(m.group(2))
             data.setdefault(cur_impl, {})
             continue
+
         m = pat_perf.search(line)
         if m and cur_impl is not None and cur_size is not None:
             g = float(m.group(1))
@@ -39,55 +41,118 @@ with open(INPUT, "r", encoding="utf-8", errors="ignore") as f:
             cur_impl = None
             cur_size = None
 
-# 需要的 impl 顺序（按你 README 展示）
-order = ["naive", "tiled", "tiled_rb1x4", "tiled_rb2x4", "cublas", "cublaslt"]
+FP32_IMPLS = [
+    "naive",
+    "tiled",
+    "tiled_rb1x4",
+    "tiled_rb2x4",
+    "cublas",
+    "cublaslt",
+]
 
-# sizes 取交集并排序
-all_sizes = set()
-for impl in order:
-    if impl in data:
-        all_sizes |= set(data[impl].keys())
-sizes = sorted(all_sizes)
+FP16_IMPLS = [
+    "tiled_fp16acc",
+    "tiled_fp16acc_rb1x4",
+    "tiled_fp16acc_rb2x4",
+    "wmma_fp16acc",
+    "cublas_gemmex_fp16acc",
+    "cublaslt_fp16acc",
+]
 
-# --- 图1：GFLOP/s vs size ---
-plt.figure()
-for impl in order:
-    if impl not in data:
-        continue
-    ys = [data[impl].get(s, float("nan")) for s in sizes]
-    plt.plot(sizes, ys, marker="o", label=impl)
-plt.xlabel("Matrix size (M=N=K)")
-plt.ylabel("GFLOP/s (median)")
-plt.title("FP32 GEMM Throughput (CUDA events, median)")
-plt.legend()
-plt.grid(True, which="both", linestyle="--", linewidth=0.5)
-out1 = OUT_DIR / "gflops_fp32.png"
-plt.savefig(out1, dpi=200, bbox_inches="tight")
-plt.close()
+def collect_sizes(impls):
+    s = set()
+    for impl in impls:
+        if impl in data:
+            s |= set(data[impl].keys())
+    return sorted(s)
 
-# --- 图2：Relative to cuBLAS ---
-if "cublaslt" in data:
+def plot_gflops(impls, sizes, title, out_path):
     plt.figure()
-    cublaslt = data["cublaslt"]
-    for impl in ["tiled_rb1x4", "tiled_rb2x4"]:
+    for impl in impls:
         if impl not in data:
             continue
-        ys = []
-        for s in sizes:
-            if s in data[impl] and s in cublaslt and cublaslt[s] != 0:
-                ys.append(100.0 * data[impl][s] / cublaslt[s])
-            else:
-                ys.append(float("nan"))
-        plt.plot(sizes, ys, marker="o", label=f"{impl}/cublaslt")
+        ys = [data[impl].get(s, float("nan")) for s in sizes]
+        plt.plot(sizes, ys, marker="o", label=impl)
     plt.xlabel("Matrix size (M=N=K)")
-    plt.ylabel("Percent of cuBLASLT (%)")
-    plt.title("Relative Throughput vs cuBLASLT (FP32)")
+    plt.ylabel("GFLOP/s (median)")
+    plt.title(title)
     plt.legend()
     plt.grid(True, which="both", linestyle="--", linewidth=0.5)
-    out2 = OUT_DIR / "rel_to_cublaslt_fp32.png"
-    plt.savefig(out2, dpi=200, bbox_inches="tight")
+    plt.savefig(out_path, dpi=200, bbox_inches="tight")
     plt.close()
 
+def plot_relative(impls, baseline_impl, sizes, title, ylabel, out_path):
+    if baseline_impl not in data:
+        print(f"[WARN] baseline {baseline_impl} not found, skip {out_path.name}")
+        return
+
+    baseline = data[baseline_impl]
+
+    plt.figure()
+    for impl in impls:
+        if impl not in data or impl == baseline_impl:
+            continue
+
+        ys = []
+        for s in sizes:
+            if s in data[impl] and s in baseline and baseline[s] != 0:
+                ys.append(100.0 * data[impl][s] / baseline[s])
+            else:
+                ys.append(float("nan"))
+        plt.plot(sizes, ys, marker="o", label=f"{impl}/{baseline_impl}")
+
+    plt.xlabel("Matrix size (M=N=K)")
+    plt.ylabel(ylabel)
+    plt.title(title)
+    plt.legend()
+    plt.grid(True, which="both", linestyle="--", linewidth=0.5)
+    plt.savefig(out_path, dpi=200, bbox_inches="tight")
+    plt.close()
+
+# FP32 plots
+fp32_sizes = collect_sizes(FP32_IMPLS)
+out_fp32_gflops = OUT_DIR / "gflops_fp32.png"
+out_fp32_rel = OUT_DIR / "rel_to_cublas_fp32.png"
+
+plot_gflops(
+    FP32_IMPLS,
+    fp32_sizes,
+    "FP32 GEMM Throughput (CUDA events, median)",
+    out_fp32_gflops,
+)
+
+plot_relative(
+    FP32_IMPLS,
+    "cublas",
+    fp32_sizes,
+    "Relative Throughput vs cuBLAS (FP32)",
+    "Percent of cuBLAS (%)",
+    out_fp32_rel,
+)
+
+# FP16 / Tensor Core plots
+fp16_sizes = collect_sizes(FP16_IMPLS)
+out_fp16_gflops = OUT_DIR / "gflops_fp16.png"
+out_fp16_rel = OUT_DIR / "rel_to_cublas_fp16.png"
+
+plot_gflops(
+    FP16_IMPLS,
+    fp16_sizes,
+    "FP16 input + FP32 accumulate Throughput (CUDA events, median)",
+    out_fp16_gflops,
+)
+
+plot_relative(
+    FP16_IMPLS,
+    "cublas_gemmex_fp16acc",
+    fp16_sizes,
+    "Relative Throughput vs cuBLAS GemmEx FP16acc",
+    "Percent of cuBLAS GemmEx FP16acc (%)",
+    out_fp16_rel,
+)
+
 print(f"[OK] Parsed: {INPUT}")
-print(f"[OK] Wrote: {out1}")
-print(f"[OK] Wrote: {OUT_DIR / 'rel_to_cublaslt_fp32.png'}")
+print(f"[OK] Wrote: {out_fp32_gflops}")
+print(f"[OK] Wrote: {out_fp32_rel}")
+print(f"[OK] Wrote: {out_fp16_gflops}")
+print(f"[OK] Wrote: {out_fp16_rel}")

@@ -14,14 +14,13 @@ LOG_DIR="logs"
 WARMUP="${WARMUP:-3}"
 REPEAT="${REPEAT:-10}"
 
-# 先做最小闭环：9个点
 SIZES=(${SIZES_OVERRIDE:-256 512 1024})
-IMPLS=(naive tiled tiled_rb1x4 tiled_rb2x4 tiled_fp16acc tiled_fp16acc_rb1x4 tiled_fp16acc_rb2x4 cublas cublaslt)
+IMPLS=(naive tiled tiled_rb1x4 tiled_rb2x4 cublas cublaslt tiled_fp16acc tiled_fp16acc_rb1x4 tiled_fp16acc_rb2x4 wmma_fp16acc cublas_gemmex_fp16acc cublaslt_fp16acc)
 
 mkdir -p "${OUT_DIR}" "${LOG_DIR}"
 
 TS=$(date +%Y%m%d_%H%M%S)
-OUT_TXT="${OUT_DIR}/bench_fp32_${TS}.txt"
+OUT_TXT="${OUT_DIR}/bench_fp16_${TS}.txt"
 
 echo "# bench_gemm batch run" | tee "${OUT_TXT}"
 echo "# time: $(date)" | tee -a "${OUT_TXT}"

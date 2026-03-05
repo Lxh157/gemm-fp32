@@ -9,9 +9,7 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 # 生成 compile_commands.json（方便编辑器/工具）
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-  set(CMAKE_CUDA_ARCHITECTURES 89)
-endif()
+set(CMAKE_CUDA_ARCHITECTURES 89)
 
 add_executable(bench_gemm
   src/main_bench.cu
@@ -19,11 +17,15 @@ add_executable(bench_gemm
   src/gemm_tiled.cu
   src/gemm_tiled_rb1x4.cu
   src/gemm_tiled_rb2x4.cu
+  src/gemm_cublas.cu
+  src/cublaslt_baseline.cu
+
   src/gemm_tiled_fp16acc.cu
   src/gemm_tiled_fp16acc_rb1x4.cu
   src/gemm_tiled_fp16acc_rb2x4.cu
-  src/gemm_cublas.cu
-  src/cublaslt_baseline.cu
+  src/gemm_wmma_fp16acc.cu
+  src/gemm_cublas_gemmex_fp16acc.cu
+  src/cublaslt_fp16acc.cu
 )
 
 
