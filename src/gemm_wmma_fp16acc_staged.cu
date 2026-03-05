@@ -1,4 +1,4 @@
-// src/gemm_wmma_fp16acc.cu
+// src/gemm_wmma_fp16acc_staged.cu
 #include "utils.cuh"
 
 #include <mma.h>
@@ -28,7 +28,7 @@ constexpr int SKEW_HALF = 8;
 constexpr int SMEM_STRIDE_A = BLOCK_K + SKEW_HALF; // 24
 constexpr int SMEM_STRIDE_B = BLOCK_N + SKEW_HALF; // 72
 
-__global__ void gemm_wmma_fp16acc_kernel(
+__global__ void gemm_wmma_fp16acc_staged_kernel(
     const half* __restrict__ A,
     const half* __restrict__ B,
     float* __restrict__ C,
@@ -89,7 +89,7 @@ __global__ void gemm_wmma_fp16acc_kernel(
     wmma::store_matrix_sync(C_ptr, c_frag, N, wmma::mem_row_major);
 }
 
-void launch_gemm_wmma_fp16acc(
+void launch_gemm_wmma_fp16acc_staged(
     const half* dA, const half* dB, float* dC,
     int M, int N, int K, cudaStream_t stream) {
 
@@ -107,6 +107,6 @@ void launch_gemm_wmma_fp16acc(
         M / BLOCK_M
     );
 
-    gemm_wmma_fp16acc_kernel<<<grid, block, 0, stream>>>(dA, dB, dC, M, N, K);
+    gemm_wmma_fp16acc_staged_kernel<<<grid, block, 0, stream>>>(dA, dB, dC, M, N, K);
     CHECK_CUDA(cudaGetLastError());
 }

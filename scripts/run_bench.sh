@@ -15,7 +15,7 @@ WARMUP="${WARMUP:-3}"
 REPEAT="${REPEAT:-10}"
 
 SIZES=(${SIZES_OVERRIDE:-256 512 1024})
-IMPLS=(naive tiled tiled_rb1x4 tiled_rb2x4 cublas cublaslt tiled_fp16acc tiled_fp16acc_rb1x4 tiled_fp16acc_rb2x4 wmma_fp16acc cublas_gemmex_fp16acc cublaslt_fp16acc)
+IMPLS=(naive tiled tiled_rb1x4 tiled_rb2x4 cublas cublaslt tiled_fp16acc tiled_fp16acc_rb1x4 tiled_fp16acc_rb2x4 wmma_fp16acc wmma_fp16acc_staged cublas_gemmex_fp16acc cublaslt_fp16acc)
 
 mkdir -p "${OUT_DIR}" "${LOG_DIR}"
 

@@ -105,8 +105,8 @@ bash scripts/run_bench.sh
 
 - 输出目录：`results/raw/`
     
-- 文件名：`bench_fp32_YYYYmmdd_HHMMSS.txt`  
-    例如：`results/raw/bench_fp32_20260225_214132.txt`
+- 文件名：`bench_fp16_YYYYmmdd_HHMMSS.txt`  
+    例如：`results/raw/bench_fp16_20260225_214132.txt`
     
 
 也可以自定义参数：
