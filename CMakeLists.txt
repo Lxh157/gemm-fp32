@@ -25,6 +25,7 @@ add_executable(bench_gemm
   src/gemm_tiled_fp16acc_rb2x4.cu
   src/gemm_wmma_fp16acc.cu
   src/gemm_wmma_fp16acc_staged.cu
+  src/gemm_wmma_fp16acc_staged_db.cu
   src/gemm_cublas_gemmex_fp16acc.cu
   src/cublaslt_fp16acc.cu
 )

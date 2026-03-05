@@ -56,6 +56,7 @@ FP16_IMPLS = [
     "tiled_fp16acc_rb2x4",
     "wmma_fp16acc",
     "wmma_fp16acc_staged",
+    "wmma_fp16acc_staged_db",
     "cublas_gemmex_fp16acc",
     "cublaslt_fp16acc",
 ]
@@ -145,7 +146,7 @@ plot_gflops(
 
 plot_relative(
     FP16_IMPLS,
-    "wmma_fp16acc_staged",
+    "wmma_fp16acc_staged_db",
     fp16_sizes,
     "Relative Throughput vs cuBLAS GemmEx FP16acc",
     "Percent of cuBLAS GemmEx FP16acc (%)",
