@@ -4,8 +4,8 @@
 
 本项目用于练习 CUDA / GPU 性能优化与 profiling，围绕 GEMM（矩阵乘法）实现一条清晰的优化链路，并用 **benchmark 数据 + Nsight Compute 指标**形成可复现实验结论。
 
-目标是从 naive / tiled / register blocking，一路推进到 FP16 / Tensor Core / cuBLASLt baseline
-    
+目标是从 naive / tiled / register blocking，一路推进到 FP16 / Tensor Core / cuBLASLt baseline。
+
 ## 当前进展
 
 - 搭建 benchmark 框架：参数化 M/N/K，CUDA events 计时，输出 min / median / avg 与 GFLOP/s
@@ -16,28 +16,25 @@
 - 接入 cublasSgemm 做 FP32 baseline
 - 接入 cublasLt（FP32）做 baseline
 
-- tiled_fp16acc GEMM kernel（FP16 input + FP32 accumulate）
-- tiled_fp16acc_rb1x4 GEMM kernel（FP16 input + FP32 accumulate）
-- tiled_fp16acc_rb2x4 GEMM kernel（FP16 input + FP32 accumulate）
+- tiled_fp16acc GEMM kernel（FP16 input + FP32 accumulate，non-Tensor-Core）
+- tiled_fp16acc_rb1x4 GEMM kernel（FP16 input + FP32 accumulate，non-Tensor-Core）
+- tiled_fp16acc_rb2x4 GEMM kernel（FP16 input + FP32 accumulate，non-Tensor-Core）
+
 - wmma_fp16acc（minimal demo）
+- wmma_fp16acc_staged（shared-memory staged WMMA）
+- wmma_fp16acc_staged_cpasync（cp.async 流水化 staged WMMA）
+
 - 接入 cublas_gemmex_fp16acc 做 FP16 Tensor Core baseline
 - 接入 cublaslt_fp16acc 做 FP16 Tensor Core baseline
 - 统一口径 batch benchmark / 图表 / NCU 分析 / README 总结
-    
 
 ## 环境
 
-- GPU: NVIDIA GeForce RTX 4060 Laptop GPU
-    
+- GPU: NVIDIA GeForce RTX 4060 Laptop GPU（SM89 / Ada）
 - OS: WSL2 Ubuntu
-    
-- CUDA: 13.1
-    
-- Compiler: g++ / nvcc 12.8
-    
-- Tools: Nsight Compute / Nsight Systems（基础使用）
-    
-
+- CUDA Toolkit / nvcc: 12.8（V12.8.93）
+- Build: CMake + make
+- Tools: Nsight Compute / Nsight Systems
 
 ## 目录结构
 
@@ -45,18 +42,24 @@
 gemm-fp16/
   src/
     main_bench.cu            # benchmark 入口
-    gemm_naive.cu            
-    gemm_tiled.cu            
-    gemm_tiled_rb1x4.cu      
-    gemm_tiled_rb2x4.cu      
-    gemm_cublas.cu           
+    gemm_naive.cu
+    gemm_tiled.cu
+    gemm_tiled_rb1x4.cu
+    gemm_tiled_rb2x4.cu
+    gemm_cublas.cu
     cublaslt_baseline.cu
+
     gemm_tiled_fp16acc.cu
     gemm_tiled_fp16acc_rb1x4.cu
     gemm_tiled_fp16acc_rb2x4.cu
+
     gemm_wmma_fp16acc.cu
+    gemm_wmma_fp16acc_staged.cu
+    gemm_wmma_fp16acc_staged_cpasync.cu
+
     gemm_cublas_gemmex_fp16acc.cu
     cublaslt_fp16acc.cu
+
     utils.cuh                # 工具函数 / 校验 / 计时辅助
   scripts/
     run_bench.sh             # 批量跑 benchmark
@@ -138,8 +141,9 @@ BUILD_DIR=build WARMUP=5 REPEAT=20 bash scripts/run_bench.sh
     
 
 ## 当前结果
-
-### 表 A：FP32 路线（CUDA events，warmup=3，repeat=10，取 median；全部 correctness PASS）
+>说明：下表均来自同一轮 run_bench.sh 的 raw 输出文件：
+>results/raw/bench_fp16_20260305_165729_wmma_fp16acc_staged_cpasync.txt（warmup=3，repeat=10，取 median；全部 correctness PASS）
+### 表 A：FP32 路线
 
 | Impl            |     256³ |     512³ |      1024³ | 1024³ 相对 cublas |
 | --------------- | -------: | -------: | ---------: | ---------------: |
@@ -154,14 +158,15 @@ BUILD_DIR=build WARMUP=5 REPEAT=20 bash scripts/run_bench.sh
 
 ### 表 B：FP16 / Tensor Core 路线（FP16 input + FP32 accumulate）
 
-| impl                  |     256³ |     512³ |      1024³ | 1024³ 相对 cublas_gemmex_fp16acc |
-| --------------------- | -------: | -------: | ---------: | -------------------------------: |
-| tiled_fp16acc         |  756.003 |  888.624 |    894.499 |                            5.13% |
-| tiled_fp16acc_rb1x4   | 1489.455 | 2372.344 |   2379.072 |                           13.66% |
-| tiled_fp16acc_rb2x4   | 1524.093 | 2948.026 |   3669.557 |                           21.06% |
-| wmma_fp16acc          | 2048.000 | 4297.443 |   4951.953 |                           28.42% |
-| cublas_gemmex_fp16acc | 4228.129 | 9709.037 |  17421.823 |                          100.00% |
-| cublaslt_fp16acc      | 3855.059 | 9709.037 |  18396.070 |                          105.59% |
+| impl                        |     256³ |     512³ |      1024³ | 1024³ 相对 cublaslt_fp16acc |
+| --------------------------- | -------: | -------: | ---------: | -------------------------------: |
+| tiled_fp16acc               |  728.178 |  885.668 |    733.783 |                            4.17% |
+| tiled_fp16acc_rb1x4         | 1459.396 | 2340.571 |   2207.528 |                           12.56% |
+| tiled_fp16acc_rb2x4         | 1639.681 | 3015.858 |   2972.575 |                           16.91% |
+| wmma_fp16acc                | 1574.438 | 3912.597 |   5932.537 |                           33.76% |
+| wmma_fp16acc_staged         | 1525.201 | 3887.214 |   6045.027 |                           34.40% |
+| **wmma_fp16acc_staged_cpasync** | **2056.031** | **8499.097** | **14734.629** |                       **83.86%** |
+| cublaslt_fp16acc                |     4120.141 |    10485.760 |     18236.104 |                        100.00% |
 
 
 ### 可视化（results/plots）
@@ -169,41 +174,12 @@ BUILD_DIR=build WARMUP=5 REPEAT=20 bash scripts/run_bench.sh
 #### FP32
 ![FP32 GEMM throughput](results/plots/gflops_fp32.png)
 
-![Relative to cuBLAS (FP32)](results/plots/rel_to_cublas_fp32.png)
+<!-- ![Relative to cuBLASLt (FP32)](results/plots/rel_to_cublaslt_fp32.png) -->
 
 #### FP16 / Tensor Core
 ![FP16 / Tensor Core throughput](results/plots/gflops_fp16.png)
 
-![Relative to cuBLAS GemmEx FP16acc](results/plots/rel_to_cublas_fp16.png)
-
-
-    
-### Nsight Compute fp32路线瓶颈解释（tiled vs tiled_rb1x4，1024³，profiling-only）
-
-> 说明：下表指标用于解释瓶颈方向，不作为最终性能结论。
-
-| 指标 | tiled | rb1x4 | rb2x4 | 结论/变化解释 |
-| :--- | :--- | :--- | :--- | :--- |
-| Achieved Occupancy (%) | 98.55 | 79.92 | 63.15 | **tiled -> rb1x4 -> rb2x4**：每线程计算更多输出/寄存器压力更大，occupancy 下降 |
-| **Warp Cycles per Issued Instruction (cycle)** | **38.13** | **26.49** | **15.12** |**rb1x4 -> rb2x4**：**下降约 43%**：warp 发指令更紧凑，空转更少 |
-| **Stall MIO Throttle (cycles/inst)** | **20.02** | **12.98** | **4.66** |**rb1x4 -> rb2x4**：**显著下降约 64%**：MIO 队列压力减轻，shared/load 等指令相关瓶颈被摊薄 |
-| **Stall Barrier (cycles/inst)** | **5.97** | **3.98** | **1.81** |**rb1x4 -> rb2x4**：**下降约 54%**：同步/屏障开销被摊薄（每次加载/同步覆盖更多计算） |
-| Compute (SM) Throughput (SOL, %) | 96.67 | 53.63 | 65.88 |**rb1x4 -> rb2x4**：计算侧利用率提高（与更高 GFLOP/s 一致） |
-| Memory Throughput (SOL, %) | 96.67 | 74.91 | 86.86 |**rb1x4 -> rb2x4**：rb2x4 更能持续推进内存侧吞吐（更少被 stall 卡住） |
-
-### Nsight Compute：rb1x4 → rb2x4 的瓶颈解释（1024³，profiling-only）
-将每线程输出从 1×4 扩展到 2×4（rb2x4）后，Achieved Occupancy 从 **79.92%** 降至 **63.15%**，这是 coarsening/register blocking 增加寄存器与线程资源占用导致的预期 trade-off。但更关键的是，warp-level stall 显著下降：
-
-- Stall MIO Throttle：**12.98 → 4.66 cycles/inst**（约 **-64%**）
-    
-- Stall Barrier：**3.98 → 1.81 cycles/inst**（约 **-54%**）
-    
-- Warp Cycles per Issued Instruction：**26.49 → 15.12 cycle**（约 **-43%**）
-    
-- Memory Throughput（SOL）：**74.91% → 86.86%**；Compute Throughput（SOL）：**53.63% → 65.88%**
-    
-
-这说明 rb1x4 仍较多受 MIO 指令队列压力（包含 shared memory 相关指令）与 barrier/sync 开销影响；rb2x4 通过提高每次 tile load / sync 所覆盖的有效计算量，进一步摊薄 shared-load 与同步的固定成本，使 warp 更少处于“发不出下一条指令”的空转状态。对应到稳态 benchmark，rb2x4 在 1024³ 上将吞吐提升到 **3363.516 GFLOP/s**（相对 rb1x4 的 1860.827 GFLOP/s 约 **1.81×**），并达到 cuBLAS 的约 **53.25%**。
+![Relative to cuBLASLt P16acc](results/plots/rel_to_cublaslt_fp16.png)
 
 ### 关键观察与结论
 
@@ -223,39 +199,23 @@ BUILD_DIR=build WARMUP=5 REPEAT=20 bash scripts/run_bench.sh
 
 1024³：
 
-- `tiled_fp16acc`: **894.499 GFLOP/s**
-- `tiled_fp16acc_rb1x4`: **2379.072 GFLOP/s**
-- `tiled_fp16acc_rb2x4`: **3669.557 GFLOP/s**
+- `tiled_fp16acc`: **733.783 GFLOP/s**
+- `tiled_fp16acc_rb1x4`: **2207.528 GFLOP/s**
+- `tiled_fp16acc_rb2x4`: **2972.575 GFLOP/s**
 
 说明即使不使用 Tensor Core，数据类型切换并不会改变 shared/sync/issue 开销的本质约束；register blocking 依然是核心优化方向。
 
-#### 结论 3：最小 WMMA demo 已经打通 Tensor Core 路线，但当前主要受数据供给限制
+#### 结论 3：WMMA minimal 版本已打通 Tensor Core 路线，但供给路径会成为决定性瓶颈
 
-- `wmma_fp16acc` 在 1024³ 达到 **4951.953 GFLOP/s**
-- 高于 `tiled_fp16acc_rb2x4` 的 **3669.557 GFLOP/s**，但仍显著低于库级 Tensor Core baseline
+`wmma_fp16acc`（minimal）在 1024³ 达到 **5932.537 GFLOP/s**，已明显高于 non-TC 的 `tiled_fp16acc_rb2x4`（2972.575 GFLOP/s），说明 Tensor Core 路线可行。但 Nsight Compute 显示 minimal 版本会出现明显的数据供给等待（global → fragment），`Stall Long Scoreboard` 很高，compute 侧利用偏低，性能仍显著落后于库级 Tensor Core baseline。
 
-NCU 显示：
+#### 结论 4：shared-memory staged WMMA 能显著降低供给等待，但提升幅度有限
 
-- `Memory Throughput` 很高
-- `Compute Throughput` 仅 **33.85**
-- `Stall Long Scoreboard` 高达 **81.53**
-- `Warp Cycles per Issued Instruction` 高达 **101.65**
+`wmma_fp16acc_staged` 通过将 A/B tile 先搬运到 shared memory，再由 warp 从 shared memory 加载 fragment，1024³ 吞吐提升到 **6045.027 GFLOP/s**（相对 minimal 小幅提升）。这说明 staged 能有效改善 global 供给相关 stall，但在当前 tile 与同步结构下，性能仍受同步/调度等开销限制，难以逼近库实现。
 
-这说明当前 WMMA kernel 的主要问题不是 Tensor Core 本体，而是 **global memory → fragment 的供给效率不足**。
+#### 结论 5：引入 cp.async 的 staged pipeline 后吞吐跃迁到 14+ TFLOP/s，达到库实现 80%+
 
-#### 结论 4：库级 FP16 Tensor Core baseline 显著高于当前自写 WMMA demo
-
-1024³：
-
-- `wmma_fp16acc`: **4951.953 GFLOP/s**
-- `cublas_gemmex_fp16acc`: **17421.823 GFLOP/s**
-- `cublaslt_fp16acc`: **18396.070 GFLOP/s**
-
-这表明当前自写 WMMA 与成熟库实现之间仍有显著差距；下一步若继续优化 Tensor Core 路线，应优先考虑：
-
-- shared-memory staged WMMA
-- 更好的 tile / warp mapping
-- pipeline / double buffering
+`wmma_fp16acc_staged_cpasync` 使用 `cp.async` 将 global→shared 搬运异步化，并与 WMMA compute 形成流水重叠。1024³ 上吞吐达到 **14734.629 GFLOP/s**，相对 `cublas_gemmex_fp16acc` 达到 **83.86%**，相对 `cublaslt_fp16acc` 也达到约 **80%+**。Nsight Compute 指标显示 compute 与 memory 吞吐同步提升，`Stall Long Scoreboard` 维持低位，同时 `Stall Barrier` 上升，表明瓶颈开始迁移到同步/调度层面。
 
 ### 阶段性总结
 
@@ -263,14 +223,8 @@ NCU 显示：
 
 - **FP32 路线**：从 naive / tiled 走到 register blocking（rb1x4 / rb2x4），验证了 coarsening 对 shared-memory、barrier 和 issue 开销的摊薄作用。
 - **FP16 non-Tensor-Core 路线**：实现了 FP16 input + FP32 accumulate，并复现了与 FP32 类似的优化规律。
-- **Tensor Core 路线**：已完成最小 WMMA demo，并通过 cuBLAS GemmEx / cuBLASLt 建立了 FP16 Tensor Core baseline。
+- **Tensor Core 路线**：完成 WMMA 从 minimal → staged → cp.async staged 的结构演进，并与 cuBLAS GemmEx / cuBLASLt 建立 FP16 Tensor Core baseline。
 
-当前结论是：  
-对于手写 kernel，单纯“启用 WMMA / Tensor Core”并不足以逼近库级实现；真正的性能上限还取决于数据供给路径、shared-memory staging、warp/block mapping 和 pipeline 设计。
+<!-- 当前结论是：  
+对于手写 kernel，单纯“启用 WMMA / Tensor Core”并不足以逼近库级实现；想接近库级性能，需要系统性设计数据供给路径（shared-memory staging + pipeline / overlap）。 -->
 
-
-## 下一步计划（短期）
-
-1. 为自写 WMMA kernel 增加 **shared-memory staging**，降低 global memory → fragment 的数据供给开销
-2. 继续分析 WMMA kernel 的 NCU 指标，重点关注 `Long Scoreboard`、memory throughput、compute throughput 与 issue 效率
-3. 在当前 benchmark / 图表 / README 基础上，整理一版更完整的阶段性实验报告
