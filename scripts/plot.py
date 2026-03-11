@@ -46,6 +46,12 @@ FP16_IMPLS = [
     # 不放 staged_db 到主图里
     "wmma_fp16acc_staged_cpasync",
     "wmma_fp16acc_staged_cpasync_k32",
+    "wmma_fp16acc_staged_cpasync_k32_bcol",
+    "wmma_fp16acc_staged_cpasync_k32_4x2",
+    "wmma_fp16acc_staged_cpasync_k32_split",
+    "wmma_fp16acc_staged_cpasync_k32_skew16",
+    "wmma_fp16acc_staged_cpasync_k32_skewA16_B8",
+    "wmma_fp16acc_staged_cpasync_k32_skewA8_B16",
     # "cublas_gemmex_fp16acc",
     "cublaslt_fp16acc",
 ]
