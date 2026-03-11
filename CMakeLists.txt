@@ -27,6 +27,14 @@ add_executable(bench_gemm
   src/gemm_wmma_fp16acc_staged.cu
   src/gemm_wmma_fp16acc_staged_db.cu
   src/gemm_wmma_fp16acc_staged_cpasync.cu
+  src/gemm_wmma_fp16acc_staged_cpasync_k32.cu
+  src/gemm_wmma_fp16acc_staged_cpasync_k32_bcol.cu
+  src/gemm_wmma_fp16acc_staged_cpasync_k32_4x2.cu
+  src/gemm_wmma_fp16acc_staged_cpasync_k32_split.cu
+  src/gemm_wmma_fp16acc_staged_cpasync_k32_skew16.cu
+  src/gemm_wmma_fp16acc_staged_cpasync_k32_skewA16_B8.cu
+  src/gemm_wmma_fp16acc_staged_cpasync_k32_skewA8_B16.cu
+  src/gemm_wmma_fp16acc_staged_cpasync_k64.cu
   src/gemm_cublas_gemmex_fp16acc.cu
   src/cublaslt_fp16acc.cu
 )
