@@ -4,77 +4,80 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 
-# 运行脚本：python3 scripts/plot.py
+# 用法：
+#   python3 scripts/plot.py
+#
+# 默认行为：
+#   - Phase 1（4060）优先读取：
+#       1) results/raw/bench_phase1_4060_all_*.txt
+#       2) 若没有，再回退到历史文件 results/raw/bench_fp16_*.txt
+#   - Phase 2（4090）读取：
+#       results/raw/bench_phase2_4090_tc_*.txt
+#
+# 输出：
+#   results/plots/gflops_phase1_fp32.png
+#   results/plots/gflops_phase1_fp16.png
+#   results/plots/rel_to_cublaslt_phase1_fp16.png
+#   results/plots/gflops_phase2_4090_tc.png
+#   results/plots/rel_to_cublaslt_phase2_4090_tc.png
 
 RAW_DIR = Path("results/raw")
 OUT_DIR = Path("results/plots")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-FP32_CANDIDATES = sorted(RAW_DIR.glob("bench_fp32_*.txt"))
-FP16_CANDIDATES = sorted(RAW_DIR.glob("bench_fp16_*.txt"))
-
-INPUT_FP32 = FP32_CANDIDATES[-1] if FP32_CANDIDATES else None
-INPUT_FP16 = FP16_CANDIDATES[-1] if FP16_CANDIDATES else None
-
-if INPUT_FP32 is None and INPUT_FP16 is None:
-    raise FileNotFoundError(
-        "No results/raw/bench_fp32_*.txt or results/raw/bench_fp16_*.txt found. "
-        "Run scripts/run_bench.sh first."
-    )
-
-# 解析：
-# ===== impl=xxx, M=N=K=1024 =====
-# [perf] median=1234.567 GFLOP/s
 PAT_CASE = re.compile(r"===== impl=([\w_]+), M=N=K=(\d+) =====")
 PAT_PERF = re.compile(r"\[perf\]\s+median=([0-9.]+)\s+GFLOP/s")
 
-FP32_IMPLS = [
+PHASE1_FP32_IMPLS = [
     "naive",
     "tiled",
     "tiled_rb1x4",
     "tiled_rb2x4",
-    # "cublas",
+    "cublas",
     "cublaslt",
 ]
 
-FP16_IMPLS = [
+PHASE1_FP16_IMPLS = [
     "tiled_fp16acc",
     "tiled_fp16acc_rb1x4",
     "tiled_fp16acc_rb2x4",
     "wmma_fp16acc",
     "wmma_fp16acc_staged",
-    # 不放 staged_db 到主图里
+    "wmma_fp16acc_staged_cpasync",
+    "cublas_gemmex_fp16acc",
+    "cublaslt_fp16acc",
+]
+
+PHASE2_4090_IMPLS = [
     "wmma_fp16acc_staged_cpasync",
     "wmma_fp16acc_staged_cpasync_k32",
-    "wmma_fp16acc_staged_cpasync_k32_bcol",
-    "wmma_fp16acc_staged_cpasync_k32_4x2",
-    "wmma_fp16acc_staged_cpasync_k32_split",
     "wmma_fp16acc_staged_cpasync_k32_skew16",
-    "wmma_fp16acc_staged_cpasync_k32_skewA16_B8",
-    "wmma_fp16acc_staged_cpasync_k32_skewA8_B16",
-    # "cublas_gemmex_fp16acc",
+    "cublas_gemmex_fp16acc",
     "cublaslt_fp16acc",
 ]
 
 
+def pick_latest(candidates):
+    return candidates[-1] if candidates else None
+
+
 def parse_bench_file(path: Path):
-    data = {}  # impl -> size -> gflops
+    data = {}
     cur_impl = None
     cur_size = None
 
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
         for line in f:
-            m = PAT_CASE.search(line)
-            if m:
-                cur_impl = m.group(1)
-                cur_size = int(m.group(2))
+            m_case = PAT_CASE.search(line)
+            if m_case:
+                cur_impl = m_case.group(1)
+                cur_size = int(m_case.group(2))
                 data.setdefault(cur_impl, {})
                 continue
 
-            m = PAT_PERF.search(line)
-            if m and cur_impl is not None and cur_size is not None:
-                g = float(m.group(1))
-                data[cur_impl][cur_size] = g
+            m_perf = PAT_PERF.search(line)
+            if m_perf and cur_impl is not None and cur_size is not None:
+                data[cur_impl][cur_size] = float(m_perf.group(1))
                 cur_impl = None
                 cur_size = None
 
@@ -144,67 +147,89 @@ def plot_relative(data, impls, baseline_impl, sizes, title, ylabel, out_path):
     plt.close()
 
 
-# FP32 plots
-if INPUT_FP32 is not None:
-    data_fp32 = parse_bench_file(INPUT_FP32)
-    fp32_sizes = collect_sizes(data_fp32, FP32_IMPLS)
+phase1_explicit = sorted(RAW_DIR.glob("bench_phase1_4060_all_*.txt"))
+phase1_legacy = sorted(RAW_DIR.glob("bench_fp16_*.txt"))
+phase2_4090 = sorted(RAW_DIR.glob("bench_phase2_4090_tc_*.txt"))
 
-    out_fp32_gflops = OUT_DIR / "gflops_fp32.png"
-    out_fp32_rel = OUT_DIR / "rel_to_cublas_fp32.png"
+input_phase1 = pick_latest(phase1_explicit) or pick_latest(phase1_legacy)
+input_phase2 = pick_latest(phase2_4090)
+
+if input_phase1 is None and input_phase2 is None:
+    raise FileNotFoundError(
+        "No phase1/phase2 raw result files found under results/raw/. "
+        "Run scripts/run_bench.sh first."
+    )
+
+if input_phase1 is not None:
+    data_phase1 = parse_bench_file(input_phase1)
+
+    phase1_fp32_sizes = collect_sizes(data_phase1, PHASE1_FP32_IMPLS)
+    phase1_fp16_sizes = collect_sizes(data_phase1, PHASE1_FP16_IMPLS)
+
+    out_phase1_fp32 = OUT_DIR / "gflops_phase1_fp32.png"
+    out_phase1_fp16 = OUT_DIR / "gflops_phase1_fp16.png"
+    out_phase1_rel_fp16 = OUT_DIR / "rel_to_cublaslt_phase1_fp16.png"
 
     plot_gflops(
-        data_fp32,
-        FP32_IMPLS,
-        fp32_sizes,
-        "FP32 GEMM Throughput (CUDA events, median)",
-        out_fp32_gflops,
+        data_phase1,
+        PHASE1_FP32_IMPLS,
+        phase1_fp32_sizes,
+        "Phase 1 (RTX 4060 Laptop) - FP32 GEMM Throughput",
+        out_phase1_fp32,
+    )
+
+    plot_gflops(
+        data_phase1,
+        PHASE1_FP16_IMPLS,
+        phase1_fp16_sizes,
+        "Phase 1 (RTX 4060 Laptop) - FP16 / Tensor Core Throughput",
+        out_phase1_fp16,
     )
 
     plot_relative(
-        data_fp32,
-        FP32_IMPLS,
-        "cublaslt",
-        fp32_sizes,
-        "Relative Throughput vs cuBLASLt (FP32)",
-        "Percent of cuBLASLt (%)",
-        out_fp32_rel,
-    )
-
-    print(f"[OK] Parsed FP32: {INPUT_FP32}")
-    print(f"[OK] Wrote: {out_fp32_gflops}")
-    print(f"[OK] Wrote: {out_fp32_rel}")
-else:
-    print("[WARN] No bench_fp32_*.txt found, skip FP32 plots.")
-
-
-# FP16 / Tensor Core plots
-if INPUT_FP16 is not None:
-    data_fp16 = parse_bench_file(INPUT_FP16)
-    fp16_sizes = collect_sizes(data_fp16, FP16_IMPLS)
-
-    out_fp16_gflops = OUT_DIR / "gflops_fp16.png"
-    out_fp16_rel = OUT_DIR / "rel_to_cublaslt_fp16.png"
-
-    plot_gflops(
-        data_fp16,
-        FP16_IMPLS,
-        fp16_sizes,
-        "FP16 input + FP32 accumulate Throughput (CUDA events, median)",
-        out_fp16_gflops,
-    )
-
-    plot_relative(
-        data_fp16,
-        FP16_IMPLS,
+        data_phase1,
+        PHASE1_FP16_IMPLS,
         "cublaslt_fp16acc",
-        fp16_sizes,
-        "Relative Throughput vs cuBLASLt FP16acc",
+        phase1_fp16_sizes,
+        "Phase 1 (RTX 4060 Laptop) - Relative Throughput vs cuBLASLt FP16acc",
         "Percent of cuBLASLt FP16acc (%)",
-        out_fp16_rel,
+        out_phase1_rel_fp16,
     )
 
-    print(f"[OK] Parsed FP16: {INPUT_FP16}")
-    print(f"[OK] Wrote: {out_fp16_gflops}")
-    print(f"[OK] Wrote: {out_fp16_rel}")
+    print(f"[OK] Parsed Phase 1 raw: {input_phase1}")
+    print(f"[OK] Wrote: {out_phase1_fp32}")
+    print(f"[OK] Wrote: {out_phase1_fp16}")
+    print(f"[OK] Wrote: {out_phase1_rel_fp16}")
 else:
-    print("[WARN] No bench_fp16_*.txt found, skip FP16 plots.")
+    print("[WARN] No Phase 1 raw file found, skip Phase 1 plots.")
+
+if input_phase2 is not None:
+    data_phase2 = parse_bench_file(input_phase2)
+    phase2_sizes = collect_sizes(data_phase2, PHASE2_4090_IMPLS)
+
+    out_phase2_gflops = OUT_DIR / "gflops_phase2_4090_tc.png"
+    out_phase2_rel = OUT_DIR / "rel_to_cublaslt_phase2_4090_tc.png"
+
+    plot_gflops(
+        data_phase2,
+        PHASE2_4090_IMPLS,
+        phase2_sizes,
+        "Phase 2 (RTX 4090 Server) - Tensor Core Mainline Throughput",
+        out_phase2_gflops,
+    )
+
+    plot_relative(
+        data_phase2,
+        PHASE2_4090_IMPLS,
+        "cublaslt_fp16acc",
+        phase2_sizes,
+        "Phase 2 (RTX 4090 Server) - Relative Throughput vs cuBLASLt FP16acc",
+        "Percent of cuBLASLt FP16acc (%)",
+        out_phase2_rel,
+    )
+
+    print(f"[OK] Parsed Phase 2 raw: {input_phase2}")
+    print(f"[OK] Wrote: {out_phase2_gflops}")
+    print(f"[OK] Wrote: {out_phase2_rel}")
+else:
+    print("[WARN] No Phase 2 raw file found, skip Phase 2 plots.")
