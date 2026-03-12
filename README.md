@@ -9,7 +9,6 @@
 - **Phase 1（RTX 4060 Laptop / WSL2）**：从 naive / tiled / register blocking，推进到 FP16 / Tensor Core / cuBLASLt baseline，形成完整的入门优化链路。
 - **Phase 2（RTX 4090 Server / CUDA 11.8）**：围绕 Tensor Core 主干继续推进，重点优化 `wmma_fp16acc_staged_cpasync` → `k32` → `skew16` 这条 Ada 路线，并与 `cublas_gemmex_fp16acc` / `cublaslt_fp16acc` 做对比。
 
----
 
 ## 当前进展
 
@@ -45,7 +44,6 @@
   - `src/gemm_mma_ldmatrix_fp16acc_stage2.cu`
   - `impl = mma_ldmatrix_fp16acc_stage2`
 
----
 
 ## 环境
 
@@ -71,7 +69,6 @@ export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 - Build: CMake + make
 - Tools: Nsight Compute / Nsight Systems
 
----
 
 ## 目录结构
 
@@ -122,7 +119,6 @@ gemm-fp16/
   logs/
 ```
 
----
 
 ## 复现方式（Build / Run）
 
@@ -196,7 +192,6 @@ python3 scripts/plot.py
 - `results/plots/gflops_phase2_4090_tc.png`
 - `results/plots/rel_to_cublaslt_phase2_4090_tc.png`
 
----
 
 ## 实验口径说明
 
@@ -217,17 +212,13 @@ ncu --set full --target-processes all --force-overwrite \
 ./build/bench_gemm --impl <impl> --M 2048 --N 2048 --K 2048 --warmup 0 --repeat 1 --no-check
 ```
 
----
-
 ## 当前结果
 
----
-
-## Phase 1 — RTX 4060 Laptop（完整优化链路）
+### Phase 1 — RTX 4060 Laptop（完整优化链路）
 
 > Phase 1 使用 4060 Laptop + WSL2 环境，主要目的是把从 FP32 / non-TC 到 WMMA / cp.async 的完整优化链条跑通。该阶段结果不与 4090 阶段混图展示。
 
-### 表 A：FP32 路线（4060）
+#### 表 A：FP32 路线（4060）
 
 | Impl            |     256³ |     512³ |   1024³ | 1024³ 相对 cublas |
 | --------------- | -------: | -------: | ------: | ----------------: |
@@ -238,7 +229,7 @@ ncu --set full --target-processes all --force-overwrite \
 | cublas          | 2048.000 | 4861.552 | 6316.723 |           100.00% |
 | cublaslt        | 2048.000 | 4606.594 | 6307.224 |            99.85% |
 
-### 表 B：FP16 / Tensor Core 路线（4060）
+#### 表 B：FP16 / Tensor Core 路线（4060）
 
 | impl                              |     256³ |     512³ |    1024³ | 1024³ 相对 cublaslt_fp16acc |
 | --------------------------------- | -------: | -------: | --------: | ---------------------------: |
@@ -253,27 +244,26 @@ ncu --set full --target-processes all --force-overwrite \
 > Phase 1 的主结论是：  
 > register blocking 在 FP32 / non-TC 路线上都有效；而在 Tensor Core 路线上，真正决定性能上限的是数据供给路径，单纯 WMMA minimal 不足以接近库实现，引入 staged + cp.async 后才出现显著跃迁。该阶段原始 README 与图表主要记录的是这条完整教学式优化链路。 
 
-### Phase 1 图表
+#### Phase 1 图表
 ![Phase 1 FP32 throughput](results/plots/gflops_phase1_fp32.png)
 
 ![Phase 1 FP16 / Tensor Core throughput](results/plots/gflops_phase1_fp16.png)
 
 ![Phase 1 relative to cuBLASLt FP16acc](results/plots/rel_to_cublaslt_phase1_fp16.png)
 
----
 
-## Phase 2 — RTX 4090 Server（Tensor Core 主线继续推进）
+### Phase 2 — RTX 4090 Server（Tensor Core 主线推进）
 
 > Phase 2 使用 4090 server + CUDA 11.8，目标不再是重复 Phase 1 的全链路，而是只围绕 Tensor Core 主干继续推进，因此不再更新早期 FP32 / non-Tensor-Core kernels。
 
-### Phase 2 主测试集合
+#### Phase 2 主测试集合
 - `wmma_fp16acc_staged_cpasync`
 - `wmma_fp16acc_staged_cpasync_k32`
 - `wmma_fp16acc_staged_cpasync_k32_skew16`
 - `cublas_gemmex_fp16acc`
 - `cublaslt_fp16acc`
 
-### 表 C：4090，1024³（FP16 input + FP32 accumulate）
+#### 表 C：4090，1024³（FP16 input + FP32 accumulate）
 
 | impl                                    | 1024³ TFLOP/s | 相对 cublaslt_fp16acc |
 | --------------------------------------- | ------------: | --------------------: |
@@ -283,7 +273,7 @@ ncu --set full --target-processes all --force-overwrite \
 | cublas_gemmex_fp16acc                   | 66.91         | 98.9%                  |
 | cublaslt_fp16acc                        | 67.65         | 100.0%                |
 
-### 表 D：4090，2048³（FP16 input + FP32 accumulate）
+#### 表 D：4090，2048³（FP16 input + FP32 accumulate）
 
 | impl                                    | 2048³ TFLOP/s | 相对 cublaslt_fp16acc |
 | --------------------------------------- | ------------: | --------------------: |
@@ -296,16 +286,15 @@ ncu --set full --target-processes all --force-overwrite \
 > Phase 2 的主结论是： 
 > 在 4090 上，`wmma_fp16acc_staged_cpasync_k32_skew16` 已经成为当前最强 custom kernel；它在 `1024^3` 上不仅显著高于 `k32`，也已超过当前仓库口径的 `cublaslt_fp16acc` baseline，但在 `2048^3` 上仍明显落后 vendor。因此，shared layout / pitch 是一个非常有效的杠杆，但还不足以把大方阵完全拉到 vendor 的实现层级。 
 
-### Phase 2 图表
+#### Phase 2 图表
 ![Phase 2 4090 Tensor Core throughput](results/plots/gflops_phase2_4090_tc.png)
 
 ![Phase 2 4090 relative to cuBLASLt FP16acc](results/plots/rel_to_cublaslt_phase2_4090_tc.png)
 
----
 
 ## 4090 Profiling 结论（围绕 `k32` / `skew16` / `cublaslt_fp16acc`）
 
-### 1) `skew16` 相对 `k32` 的提升是真实的，不是 bench 假象
+### 1) `skew16` 相对 `k32` 的提升是真实的
 在 2048³ 上，Nsight Compute 显示：
 
 - `Issue Slots Busy`：**25.21% → 37.42%**
@@ -334,7 +323,6 @@ ncu --set full --target-processes all --force-overwrite \
 
 这说明 vendor kernel 已进入一种**以极重 tile / pipeline 设计来追求 tensor-pipeline 饱和**；而当前 `WMMA + cp.async + K32 + skew16` kernel 仍然更依赖较健康的 warp supply / issue efficiency 去喂 tensor core。二者并不在同一个微内核设计层级上。
 
----
 
 ## 当前最佳 kernel
 
@@ -349,7 +337,6 @@ ncu --set full --target-processes all --force-overwrite \
 - 它不是最终答案，也不意味着已经整体超越 cublasLt
 - 它证明了 shared-layout sweet spot 的有效性，同时也证明了继续简单 sweep pitch 并不能自动把大方阵拉近到 cublasLt 的实现层级
 
----
 
 ## 下一步
 
