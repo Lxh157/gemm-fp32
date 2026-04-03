@@ -257,79 +257,101 @@ ncu --set full --target-processes all --force-overwrite \
 > Phase 2 使用 4090 server + CUDA 11.8，目标不再是重复 Phase 1 的全链路，而是只围绕 Tensor Core 主干继续推进，因此不再更新早期 FP32 / non-Tensor-Core kernels。
 
 #### Phase 2 主测试集合
-- `wmma_fp16acc_staged_cpasync`
-- `wmma_fp16acc_staged_cpasync_k32`
 - `wmma_fp16acc_staged_cpasync_k32_skew16`
-- `cublas_gemmex_fp16acc`
+- `wmma_fp16acc_staged_cpasync_k32_4x4_skew16`
+- `wmma_fp16acc_staged_cpasync_k32_4x8_skew16`
+- `wmma_fp16acc_staged_cpasync_k64_skew16`
+- `wmma_fp16acc_staged_cpasync_k64_4x4_skew16`
 - `cublaslt_fp16acc`
-
-#### 表 C：4090，1024³（FP16 input + FP32 accumulate）
-
-| impl                                    | 1024³ TFLOP/s | 相对 cublaslt_fp16acc |
-| --------------------------------------- | ------------: | --------------------: |
-| wmma_fp16acc_staged_cpasync             | 47.66         | 70.6%                 |
-| wmma_fp16acc_staged_cpasync_k32         | 56.66         | 83.9%                 |
-| **wmma_fp16acc_staged_cpasync_k32_skew16** | **80.66**   | **119.4%**            |
-| cublas_gemmex_fp16acc                   | 66.91         | 98.9%                  |
-| cublaslt_fp16acc                        | 67.65         | 100.0%                |
-
-#### 表 D：4090，2048³（FP16 input + FP32 accumulate）
-
-| impl                                    | 2048³ TFLOP/s | 相对 cublaslt_fp16acc |
-| --------------------------------------- | ------------: | --------------------: |
-| wmma_fp16acc_staged_cpasync             | 46.25         | 31.6%                 |
-| wmma_fp16acc_staged_cpasync_k32         | 60.58         | 41.3%                 |
-| **wmma_fp16acc_staged_cpasync_k32_skew16** | **90.42**   | **62.0%**             |
-| cublas_gemmex_fp16acc                   | 146.03        | 99.7%                  |
-| cublaslt_fp16acc                        | 146.51        | 100.0%                |
-
-> Phase 2 的主结论是： 
-> 在 4090 上，`wmma_fp16acc_staged_cpasync_k32_skew16` 已经成为当前最强 custom kernel；它在 `1024^3` 上不仅显著高于 `k32`，也已超过当前仓库口径的 `cublaslt_fp16acc` baseline，但在 `2048^3` 上仍明显落后 vendor。因此，shared layout / pitch 是一个非常有效的杠杆，但还不足以把大方阵完全拉到 vendor 的实现层级。 
 
 #### Phase 2 图表
 ![Phase 2 4090 Tensor Core throughput](results/plots/gflops_phase2_4090_tc_4x8.png)
 
 ![Phase 2 4090 relative to cuBLASLt FP16acc](results/plots/rel_to_cublaslt_phase2_4090_tc_4x8.png)
 
+#### 全尺寸 sweep 的阶段性结论
+- `wmma_fp16acc_staged_cpasync_k32_skew16` 不再是“吃全尺寸”的唯一主干；它在 `1024` 上仍强，但在更大尺寸上开始显露颓势。
+- `wmma_fp16acc_staged_cpasync_k64_skew16` 在 **256 / 512 / 768** 三个小尺寸上表现最好，说明 **K-depth 从 32 提到 64** 这条线在 small-shape 上是有效杠杆。
+- `wmma_fp16acc_staged_cpasync_k64_4x4_skew16` 从 **1024 一直到 4096** 持续成为 custom kernel 中的最佳版本，说明对于 large-shape，单纯 `k64` 还不够，必须与更大的 CTA tile 一起结合，收益才稳定。
+- `wmma_fp16acc_staged_cpasync_k32_4x8_skew16` 明显不如 `k32_4x4_skew16` / `k64_4x4_skew16`，说明 **tile 继续做大并不会自动变强**，仍然受到资源占用、调度与 memory-side 行为的共同约束。
+- 与 `cublaslt_fp16acc` 的对比上：
+  - `k32_skew16` 只在 `1024` 这一点超过当前仓库口径的 `cublaslt_fp16acc` baseline；
+  - `k64_skew16` 在 `256 / 512 / 1024` 上都超过了当前仓库口径的 `cublaslt_fp16acc` baseline；
+  - `k64_4x4_skew16` 在大尺寸上相对 `k32_skew16` 有系统性提升，但仍未在大方阵上逼近 vendor 真正的强实现。
 
-## 4090 Profiling 结论（围绕 `k32` / `skew16` / `cublaslt_fp16acc`）
+## 4090 Profiling 结论
 
 ### 1) `skew16` 相对 `k32` 的提升是真实的
-在 2048³ 上，Nsight Compute 显示：
 
-- `Issue Slots Busy`：**25.21% → 37.42%**
-- `Eligible Warps / Scheduler`：**0.35 → 0.60**
-- `Warp Cycles / Issued Instruction`：**31.16 → 20.05**
-- `Barrier stall`：**12.3 cycles → 6.1 cycles**
-- `Memory Throughput`：**53.73 GB/s → 76.53 GB/s**
-- `Compute (SM)`：**29.51% → 43.84%**
+在旧主线对照中，`skew16` 相比 `k32` 可以同时改善：
 
-这说明 `skew16` 的收益机制是：  
-**同时压低 barrier stall 与 operand/data-ready 相关等待，从而提高 warp readiness、issue 连续性以及 memory feed。**
+- warp readiness
+- issue continuity
+- barrier 相关 stall
+- memory feed
 
-### 2) `skew16` 的收益不能简单解释成“shared bank conflict 下降”
-`shared excessive wavefronts` 并没有随着 `skew16` 同步明显改善，因此更准确的表述是：
+这说明 `skew16` 的收益不是 benchmark 偶然波动，而是确实改变了 kernel 的执行状态。
 
-- `skew16` 改变了 shared layout 之后，整体上改善了 operand feeding / warp readiness / issue continuity
-- 但这个收益机制不能被简化成单一的 bank-conflict 叙述
+### 2) `k64` 的收益不能简单解释成“调度更顺”
 
-### 3) 当前 custom kernel 与 cublasLt 仍处在不同 operating point
-`cublaslt_fp16acc` 对应的 CUTLASS-like kernel 在 2048³ 上表现出：
+在 `1024` 与 `4096` 的新一轮 Nsight Compute 摘要对照中：
 
-- 更重的资源占用（`228 registers/thread`）
-- 更高的 dynamic shared memory（`73.73 KB/block`）
-- 更低的 occupancy（`16.67%`）
-- 更强的 tensor-pipeline 主导 stall（`math pipeline unavailable = 24.6 cycles / 79.9%`）
+- `wmma_fp16acc_staged_cpasync_k64_skew16` 的 `Eligible Warps / Scheduler`、`Issued Warp / Scheduler` 并没有优于 `k32_skew16`；
+- 因此它在 small-shape 上的收益，更合理的解释是：
+  - **减少了 K-loop 次数**
+  - **降低了循环 / 同步 / 控制开销**
 
-这说明 vendor kernel 已进入一种**以极重 tile / pipeline 设计来追求 tensor-pipeline 饱和**；而当前 `WMMA + cp.async + K32 + skew16` kernel 仍然更依赖较健康的 warp supply / issue efficiency 去喂 tensor core。二者并不在同一个微内核设计层级上。
+也就是说，`k64` 的优势更偏向 loop-structure 层，而不是 scheduler-level issue 连续性层。
+
+### 3) `k64_4x4_skew16` 的收益也不能简化成“更好的 issue 指标”
+
+虽然 `k64_4x4_skew16` 在大尺寸上成为新 winner，但它并不是靠单纯更高的 issue efficiency 获胜。更合理的工程解释是：
+
+- 更大的 CTA tile / block output tile
+- 更少的 block 数
+- 更低的寄存器数（48 vs 56）
+- K64 带来的 loop 次数减少
+- 在 large-shape 上重新平衡了工作组织与资源使用
+
+因此，`k64_4x4_skew16` 的收益更像 **大 tile + K64 + resource organization rebalance**，而不是单一的 scheduler-level 改善。
+
+### 4) `k32_skew16` 与 `k64_4x4_skew16` 在 4096 上的 stall 对照
+
+补充的 `WarpStateStats + SourceCounters` 显示：
+
+- `k32_skew16 @ 4096`：
+  - `Warp Cycles / Issued Instruction = 22.26`
+  - CTA barrier stall ≈ `8.6 cycles`（约 `38.4%`）
+  - shared excessive wavefronts 占比约 `50%`
+- `k64_4x4_skew16 @ 4096`：
+  - `Warp Cycles / Issued Instruction = 28.42`
+  - shared excessive wavefronts 占比约 `49%`
+
+这进一步说明：
+
+- `k64_4x4_skew16` 的收益并不是来自“shared wavefronts 显著更干净”；
+- `k32_skew16` 的一个核心痛点是 CTA barrier stall 很重；
+- `k64_4x4_skew16` 的改善更可能来自 loop / tile / workload organization 的重新平衡，而不是 shared-access 指标单点变优。
+
+### 5) `cublaslt_fp16acc` 的 operating point 与 custom kernel 完全不同
+
+`cublaslt_fp16acc` 在 `1024` / `4096` 上表现出非常不同的资源使用模式：
+
+- 更高的寄存器压力（如 `230+ regs/thread`）
+- 更低的 occupancy / active warps
+- 更强的 math-pipeline-dominated stall 特征
+
+因此，当前 custom kernel 与 vendor 的差距，不能简单归因于某一个 shared-layout、某一个 block shape 或某一个 scheduler 指标，而更像是：
+
+> vendor 已经把 kernel 推向一种更深的 tensor-pipeline-dominated regime，而当前 custom kernel 仍主要停留在 CTA barrier、memory-side pressure 与 warp readiness 主导的 regime。
 
 
 ## 当前最佳 kernel
 
 当前最强 custom kernel：
 
-- 文件：`src/gemm_wmma_fp16acc_staged_cpasync_k32_skew16.cu`
-- impl：`wmma_fp16acc_staged_cpasync_k32_skew16`
+- 文件：`src/gemm_wmma_fp16acc_staged_cpasync_k64_4x4_skew16.cu`
+- impl：`wmma_fp16acc_staged_cpasync_k64_4x4_skew16`
 
 当前定位：
 
@@ -340,14 +362,8 @@ ncu --set full --target-processes all --force-overwrite \
 
 ## 下一步
 
-下一阶段将不再继续围绕更多 A/B skew 点做大规模 sweep，而是：
+当前最值得继续推进的方向不是再做大量盲 sweep，而是：
 
-1. 保留 `wmma_fp16acc_staged_cpasync_k32_skew16` 作为当前 best custom baseline
-2. 从当前 WMMA 路线下沉到更低层的数据通路实现：
-
-```text
-src/gemm_mma_ldmatrix_fp16acc_stage2.cu
-impl = mma_ldmatrix_fp16acc_stage2
-```
-
-目标是获得比当前 `wmma::load_matrix_sync + wmma::mma_sync` 更强的 operand delivery 与 instruction scheduling control，从而在 Ada（SM89）上继续缩小与 vendor kernel 的差距。
+1. 围绕 `wmma_fp16acc_staged_cpasync_k64_4x4_skew16` 做更针对性的 source-level stall 定位；
+2. 进一步解释大尺寸上到底是 barrier、shared-access、还是更深层的数据通路限制了继续逼近 vendor；
+3. 在保持现有 benchmark / profiling 口径不变的前提下，逐步从当前 WMMA 路线下沉到更低层的数据通路实现。
