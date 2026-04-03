@@ -20,6 +20,16 @@ import matplotlib.pyplot as plt
 #   results/plots/rel_to_cublaslt_phase1_fp16.png
 #   results/plots/gflops_phase2_4090_tc.png
 #   results/plots/rel_to_cublaslt_phase2_4090_tc.png
+#
+# 补充：
+# 后面统一这样：
+# 安装包：
+# python3 -m pip install --user 包名
+# 运行脚本：
+# python3 脚本名.py
+# 查看包：
+# python3 -m pip show 包名
+# 别再混用 python。
 
 RAW_DIR = Path("results/raw")
 OUT_DIR = Path("results/plots")
@@ -33,6 +43,7 @@ PHASE1_FP32_IMPLS = [
     "tiled",
     "tiled_rb1x4",
     "tiled_rb2x4",
+    "thread_tiled_1d",
     "cublas",
     "cublaslt",
 ]
@@ -49,10 +60,25 @@ PHASE1_FP16_IMPLS = [
 ]
 
 PHASE2_4090_IMPLS = [
-    "wmma_fp16acc_staged_cpasync",
+    # "wmma_fp16acc_staged_cpasync",
     "wmma_fp16acc_staged_cpasync_k32",
+    # "wmma_fp16acc_staged_cpasync_k32_4x2",
+    # "wmma_fp16acc_staged_cpasync_k32_split",
     "wmma_fp16acc_staged_cpasync_k32_skew16",
-    "cublas_gemmex_fp16acc",
+    "wmma_fp16acc_staged_cpasync_k32_4x4_skew16",
+    "wmma_fp16acc_staged_cpasync_k32_4x8_skew16",
+    # "wmma_fp16acc_staged_cpasync_k32_skewA16_B8",
+    # "wmma_fp16acc_staged_cpasync_k32_skewA8_B16",
+    # "wmma_fp16acc_staged_cpasync_k32_skewA24_B16",
+    # "wmma_fp16acc_staged_cpasync_k32_skewA8_B24",
+    # "wmma_fp16acc_staged_cpasync_k32_skewA8_B32",
+    # "wmma_fp16acc_staged_cpasync_k32_skewA16_B32",
+    # "wmma_fp16acc_staged_cpasync_k32_skewA24_B32",
+    "wmma_fp16acc_staged_cpasync_k64",
+    "wmma_fp16acc_staged_cpasync_k64_skew16",
+    "wmma_fp16acc_staged_cpasync_k64_4x4_skew16",
+    # "wmma_fp16acc_staged_cpasync_k64_4x8_skew16",
+    # "cublas_gemmex_fp16acc",
     "cublaslt_fp16acc",
 ]
 
@@ -207,8 +233,8 @@ if input_phase2 is not None:
     data_phase2 = parse_bench_file(input_phase2)
     phase2_sizes = collect_sizes(data_phase2, PHASE2_4090_IMPLS)
 
-    out_phase2_gflops = OUT_DIR / "gflops_phase2_4090_tc.png"
-    out_phase2_rel = OUT_DIR / "rel_to_cublaslt_phase2_4090_tc.png"
+    out_phase2_gflops = OUT_DIR / "gflops_phase2_4090_tc_4x8.png"
+    out_phase2_rel = OUT_DIR / "rel_to_cublaslt_phase2_4090_tc_4x8.png"
 
     plot_gflops(
         data_phase2,

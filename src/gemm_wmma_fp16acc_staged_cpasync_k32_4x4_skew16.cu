@@ -12,13 +12,13 @@ constexpr int WMMA_M = 16;
 constexpr int WMMA_N = 16;
 constexpr int WMMA_K = 16;
 
-// block = 2 x 4 warps => 32 x 64 output tile
-constexpr int WARPS_PER_BLOCK_M = 2;
+// block = 4 x 4 warps => 64 x 64 output tile
+constexpr int WARPS_PER_BLOCK_M = 4;
 constexpr int WARPS_PER_BLOCK_N = 4;
-constexpr int WARPS_PER_BLOCK   = WARPS_PER_BLOCK_M * WARPS_PER_BLOCK_N; // 8
-constexpr int THREADS_PER_BLOCK = WARPS_PER_BLOCK * 32;                  // 256
+constexpr int WARPS_PER_BLOCK   = WARPS_PER_BLOCK_M * WARPS_PER_BLOCK_N; // 16
+constexpr int THREADS_PER_BLOCK = WARPS_PER_BLOCK * 32;                  // 512
 
-constexpr int BLOCK_M = WARPS_PER_BLOCK_M * WMMA_M; // 32
+constexpr int BLOCK_M = WARPS_PER_BLOCK_M * WMMA_M; // 64
 constexpr int BLOCK_N = WARPS_PER_BLOCK_N * WMMA_N; // 64
 constexpr int BLOCK_K = 2 * WMMA_K;                 // 32
 
@@ -30,10 +30,10 @@ constexpr int SMEM_STRIDE_B = BLOCK_N + SKEW_HALF; // 80
 constexpr int CHUNK_BYTES = 16;
 constexpr int CHUNK_HALF  = CHUNK_BYTES / sizeof(half); // 8 half
 
-// A tile: [BLOCK_M, BLOCK_K] = [32, 32]
-// each row has 32 / 8 = 4 chunks
+// A tile: [BLOCK_M, BLOCK_K] = [64, 32]
+// each row has 64 / 8 = 8 chunks
 constexpr int A_ROW_CHUNKS = BLOCK_K / CHUNK_HALF; // 4
-constexpr int A_NUM_CHUNKS = BLOCK_M * A_ROW_CHUNKS; // 32 * 4 = 128
+constexpr int A_NUM_CHUNKS = BLOCK_M * A_ROW_CHUNKS; // 64 * 4 = 256
 
 // B tile: [BLOCK_K, BLOCK_N] = [32, 64]
 // each row has 64 / 8 = 8 chunks
@@ -57,7 +57,7 @@ __device__ __forceinline__ void cp_async_wait_all() {
     asm volatile("cp.async.wait_group 0;\n" ::);
 }
 
-__device__ __forceinline__ void load_stage_to_shared_cpasync_k32(
+__device__ __forceinline__ void load_stage_to_shared_cpasync_k32_4x4_skew16(
     const half* __restrict__ A,
     const half* __restrict__ B,
     half* __restrict__ smemA_stage,
@@ -65,11 +65,11 @@ __device__ __forceinline__ void load_stage_to_shared_cpasync_k32(
     int block_row, int block_col, int k0,
     int K, int N, int tid) {
 
-    // A tile: [32, 32], four 16B chunks per row
+    // A tile: [64, 32], eight 16B chunks per row
     for (int chunk = tid; chunk < A_NUM_CHUNKS; chunk += THREADS_PER_BLOCK) {
-        const int row = chunk / A_ROW_CHUNKS;          // 0..31
-        const int chunk_in_row = chunk % A_ROW_CHUNKS; // 0..3
-        const int col = chunk_in_row * CHUNK_HALF;     // 0,8,16,24
+        const int row = chunk / A_ROW_CHUNKS;          // 0..63
+        const int chunk_in_row = chunk % A_ROW_CHUNKS; // 0..7
+        const int col = chunk_in_row * CHUNK_HALF;     // 0,8,16,24,32,40,48,56
 
         half* smem_dst = &smemA_stage[row * SMEM_STRIDE_A + col];
         const half* gmem_src = &A[(block_row + row) * K + (k0 + col)];
@@ -81,7 +81,7 @@ __device__ __forceinline__ void load_stage_to_shared_cpasync_k32(
     for (int chunk = tid; chunk < B_NUM_CHUNKS; chunk += THREADS_PER_BLOCK) {
         const int row = chunk / B_ROW_CHUNKS;          // 0..31
         const int chunk_in_row = chunk % B_ROW_CHUNKS; // 0..7
-        const int col = chunk_in_row * CHUNK_HALF;     // 0,8,16,...,56
+        const int col = chunk_in_row * CHUNK_HALF;     // 0,8,16,24,32,40,48,56
 
         half* smem_dst = &smemB_stage[row * SMEM_STRIDE_B + col];
         const half* gmem_src = &B[(k0 + row) * N + (block_col + col)];
@@ -92,7 +92,7 @@ __device__ __forceinline__ void load_stage_to_shared_cpasync_k32(
     cp_async_commit();
 }
 
-__global__ void gemm_wmma_fp16acc_staged_cpasync_k32_skew16_kernel(
+__global__ void gemm_wmma_fp16acc_staged_cpasync_k32_4x4_skew16(
     const half* __restrict__ A,
     const half* __restrict__ B,
     float* __restrict__ C,
@@ -102,11 +102,11 @@ __global__ void gemm_wmma_fp16acc_staged_cpasync_k32_skew16_kernel(
     __shared__ half smemB[2][BLOCK_K * SMEM_STRIDE_B];
 
     const int tid     = threadIdx.x;
-    const int warp_id = tid / 32;   // 0..7
+    const int warp_id = tid / 32;   // 0..15
     const int lane_id = tid % 32;
     (void)lane_id;
 
-    const int warp_m = warp_id / WARPS_PER_BLOCK_N; // 0..1
+    const int warp_m = warp_id / WARPS_PER_BLOCK_N; // 0..3
     const int warp_n = warp_id % WARPS_PER_BLOCK_N; // 0..3
 
     const int block_row = blockIdx.y * BLOCK_M;
@@ -121,7 +121,7 @@ __global__ void gemm_wmma_fp16acc_staged_cpasync_k32_skew16_kernel(
     int read_buf = 0;
 
     // preload stage 0
-    load_stage_to_shared_cpasync_k32(
+    load_stage_to_shared_cpasync_k32_4x4_skew16(
         A, B,
         smemA[read_buf], smemB[read_buf],
         block_row, block_col, 0,
@@ -135,7 +135,7 @@ __global__ void gemm_wmma_fp16acc_staged_cpasync_k32_skew16_kernel(
         const int write_buf = read_buf ^ 1;
 
         if (next_k0 < K) {
-            load_stage_to_shared_cpasync_k32(
+            load_stage_to_shared_cpasync_k32_4x4_skew16(
                 A, B,
                 smemA[write_buf], smemB[write_buf],
                 block_row, block_col, next_k0,
@@ -181,13 +181,13 @@ __global__ void gemm_wmma_fp16acc_staged_cpasync_k32_skew16_kernel(
     wmma::store_matrix_sync(C_ptr, c_frag, N, wmma::mem_row_major);
 }
 
-void launch_gemm_wmma_fp16acc_staged_cpasync_k32_skew16(
+void launch_gemm_wmma_fp16acc_staged_cpasync_k32_4x4_skew16(
     const half* dA, const half* dB, float* dC,
     int M, int N, int K, cudaStream_t stream) {
 
     if (M % 16 != 0 || N % 16 != 0 || K % 32 != 0) {
         std::fprintf(stderr,
-            "gemm_wmma_fp16acc_staged_cpasync_k32_skew16: currently requires M,N to be multiples of 16 and K to be a multiple of 32. "
+            "gemm_wmma_fp16acc_staged_cpasync_k32_4x4_skew16: currently requires M,N to be multiples of 16 and K to be a multiple of 32. "
             "Got M=%d N=%d K=%d\n",
             M, N, K);
         std::exit(EXIT_FAILURE);
@@ -199,6 +199,6 @@ void launch_gemm_wmma_fp16acc_staged_cpasync_k32_skew16(
         M / BLOCK_M
     );
 
-    gemm_wmma_fp16acc_staged_cpasync_k32_skew16_kernel<<<grid, block, 0, stream>>>(dA, dB, dC, M, N, K);
+    gemm_wmma_fp16acc_staged_cpasync_k32_4x4_skew16<<<grid, block, 0, stream>>>(dA, dB, dC, M, N, K);
     CHECK_CUDA(cudaGetLastError());
 }

@@ -20,25 +20,20 @@ constexpr int THREADS_PER_BLOCK = WARPS_PER_BLOCK * 32;                  // 256
 
 constexpr int BLOCK_M = WARPS_PER_BLOCK_M * WMMA_M; // 32
 constexpr int BLOCK_N = WARPS_PER_BLOCK_N * WMMA_N; // 64
-constexpr int BLOCK_K = 2 * WMMA_K;                 // 32
+constexpr int BLOCK_K = 4 * WMMA_K; // 64
 
-// padding small skew to reduce shared-memory bank conflicts in WMMA loads
 constexpr int SKEW_HALF = 16;
-constexpr int SMEM_STRIDE_A = BLOCK_K + SKEW_HALF; // 48
+constexpr int SMEM_STRIDE_A = BLOCK_K + SKEW_HALF; // 80
 constexpr int SMEM_STRIDE_B = BLOCK_N + SKEW_HALF; // 80
 
 constexpr int CHUNK_BYTES = 16;
 constexpr int CHUNK_HALF  = CHUNK_BYTES / sizeof(half); // 8 half
 
-// A tile: [BLOCK_M, BLOCK_K] = [32, 32]
-// each row has 32 / 8 = 4 chunks
-constexpr int A_ROW_CHUNKS = BLOCK_K / CHUNK_HALF; // 4
-constexpr int A_NUM_CHUNKS = BLOCK_M * A_ROW_CHUNKS; // 32 * 4 = 128
+constexpr int A_ROW_CHUNKS = BLOCK_K / CHUNK_HALF; // 64 / 8 = 8
+constexpr int A_NUM_CHUNKS = BLOCK_M * A_ROW_CHUNKS; // 32 * 8 = 256
 
-// B tile: [BLOCK_K, BLOCK_N] = [32, 64]
-// each row has 64 / 8 = 8 chunks
-constexpr int B_ROW_CHUNKS = BLOCK_N / CHUNK_HALF; // 8
-constexpr int B_NUM_CHUNKS = BLOCK_K * B_ROW_CHUNKS; // 32 * 8 = 256
+constexpr int B_ROW_CHUNKS = BLOCK_N / CHUNK_HALF; // 64 / 8 = 8
+constexpr int B_NUM_CHUNKS = BLOCK_K * B_ROW_CHUNKS; // 64 * 8 = 512
 
 __device__ __forceinline__ void cp_async_cg_16B(void* smem_ptr, const void* gmem_ptr) {
     unsigned smem_addr = static_cast<unsigned>(__cvta_generic_to_shared(smem_ptr));
@@ -57,7 +52,7 @@ __device__ __forceinline__ void cp_async_wait_all() {
     asm volatile("cp.async.wait_group 0;\n" ::);
 }
 
-__device__ __forceinline__ void load_stage_to_shared_cpasync_k32(
+__device__ __forceinline__ void load_stage_to_shared_cpasync_k64_skew16(
     const half* __restrict__ A,
     const half* __restrict__ B,
     half* __restrict__ smemA_stage,
@@ -65,11 +60,11 @@ __device__ __forceinline__ void load_stage_to_shared_cpasync_k32(
     int block_row, int block_col, int k0,
     int K, int N, int tid) {
 
-    // A tile: [32, 32], four 16B chunks per row
+    // A tile: [32, 64], eight 16B chunks per row
     for (int chunk = tid; chunk < A_NUM_CHUNKS; chunk += THREADS_PER_BLOCK) {
         const int row = chunk / A_ROW_CHUNKS;          // 0..31
-        const int chunk_in_row = chunk % A_ROW_CHUNKS; // 0..3
-        const int col = chunk_in_row * CHUNK_HALF;     // 0,8,16,24
+        const int chunk_in_row = chunk % A_ROW_CHUNKS; // 0..7
+        const int col = chunk_in_row * CHUNK_HALF;     // 0,8,16,...,56
 
         half* smem_dst = &smemA_stage[row * SMEM_STRIDE_A + col];
         const half* gmem_src = &A[(block_row + row) * K + (k0 + col)];
@@ -77,7 +72,7 @@ __device__ __forceinline__ void load_stage_to_shared_cpasync_k32(
         cp_async_cg_16B(smem_dst, gmem_src);
     }
 
-    // B tile: [32, 64], eight 16B chunks per row
+    // B tile: [64, 64], eight 16B chunks per row
     for (int chunk = tid; chunk < B_NUM_CHUNKS; chunk += THREADS_PER_BLOCK) {
         const int row = chunk / B_ROW_CHUNKS;          // 0..31
         const int chunk_in_row = chunk % B_ROW_CHUNKS; // 0..7
@@ -92,7 +87,7 @@ __device__ __forceinline__ void load_stage_to_shared_cpasync_k32(
     cp_async_commit();
 }
 
-__global__ void gemm_wmma_fp16acc_staged_cpasync_k32_skew16_kernel(
+__global__ void gemm_wmma_fp16acc_staged_cpasync_k64_skew16_kernel(
     const half* __restrict__ A,
     const half* __restrict__ B,
     float* __restrict__ C,
@@ -121,7 +116,7 @@ __global__ void gemm_wmma_fp16acc_staged_cpasync_k32_skew16_kernel(
     int read_buf = 0;
 
     // preload stage 0
-    load_stage_to_shared_cpasync_k32(
+    load_stage_to_shared_cpasync_k64_skew16(
         A, B,
         smemA[read_buf], smemB[read_buf],
         block_row, block_col, 0,
@@ -135,7 +130,7 @@ __global__ void gemm_wmma_fp16acc_staged_cpasync_k32_skew16_kernel(
         const int write_buf = read_buf ^ 1;
 
         if (next_k0 < K) {
-            load_stage_to_shared_cpasync_k32(
+            load_stage_to_shared_cpasync_k64_skew16(
                 A, B,
                 smemA[write_buf], smemB[write_buf],
                 block_row, block_col, next_k0,
@@ -143,27 +138,14 @@ __global__ void gemm_wmma_fp16acc_staged_cpasync_k32_skew16_kernel(
             );
         }
 
-        // kk = 0
-        {
+        // kk = 0, 16, 32, 48
+        for (int kk = 0; kk < BLOCK_K; kk += WMMA_K) {
             wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::row_major> a_frag;
             wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::row_major> b_frag;
-
-            const half* A_smem_ptr = &smemA[read_buf][(warp_m * WMMA_M) * SMEM_STRIDE_A + 0];
-            const half* B_smem_ptr = &smemB[read_buf][0 * SMEM_STRIDE_B + warp_n * WMMA_N];
-
-            wmma::load_matrix_sync(a_frag, A_smem_ptr, SMEM_STRIDE_A);
-            wmma::load_matrix_sync(b_frag, B_smem_ptr, SMEM_STRIDE_B);
-            wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
-        }
-
-        // kk = 16
-        {
-            wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::row_major> a_frag;
-            wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::row_major> b_frag;
-
-            const half* A_smem_ptr = &smemA[read_buf][(warp_m * WMMA_M) * SMEM_STRIDE_A + WMMA_K];
-            const half* B_smem_ptr = &smemB[read_buf][WMMA_K * SMEM_STRIDE_B + warp_n * WMMA_N];
-
+        
+            const half* A_smem_ptr = &smemA[read_buf][(warp_m * WMMA_M) * SMEM_STRIDE_A + kk];
+            const half* B_smem_ptr = &smemB[read_buf][kk * SMEM_STRIDE_B + warp_n * WMMA_N];
+        
             wmma::load_matrix_sync(a_frag, A_smem_ptr, SMEM_STRIDE_A);
             wmma::load_matrix_sync(b_frag, B_smem_ptr, SMEM_STRIDE_B);
             wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
@@ -181,13 +163,13 @@ __global__ void gemm_wmma_fp16acc_staged_cpasync_k32_skew16_kernel(
     wmma::store_matrix_sync(C_ptr, c_frag, N, wmma::mem_row_major);
 }
 
-void launch_gemm_wmma_fp16acc_staged_cpasync_k32_skew16(
+void launch_gemm_wmma_fp16acc_staged_cpasync_k64_skew16(
     const half* dA, const half* dB, float* dC,
     int M, int N, int K, cudaStream_t stream) {
 
-    if (M % 16 != 0 || N % 16 != 0 || K % 32 != 0) {
+    if (M % 16 != 0 || N % 16 != 0 || K % 64 != 0) {
         std::fprintf(stderr,
-            "gemm_wmma_fp16acc_staged_cpasync_k32_skew16: currently requires M,N to be multiples of 16 and K to be a multiple of 32. "
+            "gemm_wmma_fp16acc_staged_cpasync_k64_skew16: currently requires M,N to be multiples of 16 and K to be a multiple of 64. "
             "Got M=%d N=%d K=%d\n",
             M, N, K);
         std::exit(EXIT_FAILURE);
@@ -199,6 +181,6 @@ void launch_gemm_wmma_fp16acc_staged_cpasync_k32_skew16(
         M / BLOCK_M
     );
 
-    gemm_wmma_fp16acc_staged_cpasync_k32_skew16_kernel<<<grid, block, 0, stream>>>(dA, dB, dC, M, N, K);
+    gemm_wmma_fp16acc_staged_cpasync_k64_skew16_kernel<<<grid, block, 0, stream>>>(dA, dB, dC, M, N, K);
     CHECK_CUDA(cudaGetLastError());
 }

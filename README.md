@@ -287,9 +287,9 @@ ncu --set full --target-processes all --force-overwrite \
 > 在 4090 上，`wmma_fp16acc_staged_cpasync_k32_skew16` 已经成为当前最强 custom kernel；它在 `1024^3` 上不仅显著高于 `k32`，也已超过当前仓库口径的 `cublaslt_fp16acc` baseline，但在 `2048^3` 上仍明显落后 vendor。因此，shared layout / pitch 是一个非常有效的杠杆，但还不足以把大方阵完全拉到 vendor 的实现层级。 
 
 #### Phase 2 图表
-![Phase 2 4090 Tensor Core throughput](results/plots/gflops_phase2_4090_tc.png)
+![Phase 2 4090 Tensor Core throughput](results/plots/gflops_phase2_4090_tc_4x8.png)
 
-![Phase 2 4090 relative to cuBLASLt FP16acc](results/plots/rel_to_cublaslt_phase2_4090_tc.png)
+![Phase 2 4090 relative to cuBLASLt FP16acc](results/plots/rel_to_cublaslt_phase2_4090_tc_4x8.png)
 
 
 ## 4090 Profiling 结论（围绕 `k32` / `skew16` / `cublaslt_fp16acc`）

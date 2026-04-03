@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+// 
+
 // 来自 gemm_naive.cu 的声明
 void launch_gemm_naive(const float* dA, const float* dB, float* dC,
                        int M, int N, int K,
@@ -20,6 +22,10 @@ void launch_gemm_tiled_rb1x4(const float* dA, const float* dB, float* dC,
                              cudaStream_t stream);
 // 来自 gemm_tiled_rb2x4.cu 的声明             
 void launch_gemm_tiled_rb2x4(const float* dA, const float* dB, float* dC,
+                             int M, int N, int K,
+                             cudaStream_t stream);
+// 来自 gemm_thread_tiled_1d.cu 的声明             
+void launch_gemm_thread_tiled_1d(const float* dA, const float* dB, float* dC,
                              int M, int N, int K,
                              cudaStream_t stream);
 // 来自 gemm_cublas.cu 的声明             
@@ -92,9 +98,25 @@ void launch_gemm_wmma_fp16acc_staged_cpasync_k32_skewA24_B32(const half* dA, con
 void launch_gemm_wmma_fp16acc_staged_cpasync_k32_skewA16_B8(const half* dA, const half* dB, float* dC,
                           int M, int N, int K, cudaStream_t stream);
 
+
+// 来自 gemm_wmma_fp16acc_staged_cpasync_k32_4x4_skew16.cu 的声明
+void launch_gemm_wmma_fp16acc_staged_cpasync_k32_4x4_skew16(const half* dA, const half* dB, float* dC,
+                          int M, int N, int K, cudaStream_t stream);
+// 来自 gemm_wmma_fp16acc_staged_cpasync_k32_4x8_skew16.cu 的声明
+void launch_gemm_wmma_fp16acc_staged_cpasync_k32_4x8_skew16(const half* dA, const half* dB, float* dC,
+                          int M, int N, int K, cudaStream_t stream);
 // 来自 gemm_wmma_fp16acc_staged_cpasync_k64.cu 的声明
 void launch_gemm_wmma_fp16acc_staged_cpasync_k64(const half* dA, const half* dB, float* dC,
                           int M, int N, int K, cudaStream_t stream);
+// 来自 gemm_wmma_fp16acc_staged_cpasync_k64_skew16.cu 的声明
+void launch_gemm_wmma_fp16acc_staged_cpasync_k64_skew16(const half* dA, const half* dB, float* dC,
+                          int M, int N, int K, cudaStream_t stream);
+// 来自 gemm_wmma_fp16acc_staged_cpasync_k64_4x4_skew16.cu 的声明
+void launch_gemm_wmma_fp16acc_staged_cpasync_k64_4x4_skew16(const half* dA, const half* dB, float* dC,
+                          int M, int N, int K, cudaStream_t stream);
+// 来自 gemm_wmma_fp16acc_staged_cpasync_k64_4x8_skew16.cu 的声明
+// void launch_gemm_wmma_fp16acc_staged_cpasync_k64_4x8_skew16(const half* dA, const half* dB, float* dC,
+//                           int M, int N, int K, cudaStream_t stream);
 // 非严格参数解析
 // 支持：
 //   ./bench_gemm
@@ -157,9 +179,9 @@ Args parse_args(int argc, char** argv) {
     } else if (s == "--impl") {
         need_value(i);
         a.impl = argv[++i];
-        if (a.impl != "naive" && a.impl != "tiled" && a.impl != "tiled_rb1x4" && a.impl != "tiled_rb2x4" && a.impl != "cublas" && a.impl != "cublaslt" && a.impl != "tiled_fp16acc" && a.impl != "tiled_fp16acc_rb1x4" && a.impl != "tiled_fp16acc_rb2x4" && a.impl != "wmma_fp16acc" && a.impl != "wmma_fp16acc_staged" && a.impl != "wmma_fp16acc_staged_db" && a.impl != "wmma_fp16acc_staged_cpasync" && a.impl != "wmma_fp16acc_staged_cpasync_k32" && a.impl != "wmma_fp16acc_staged_cpasync_k32_bcol" && a.impl != "wmma_fp16acc_staged_cpasync_k32_4x2" && a.impl != "wmma_fp16acc_staged_cpasync_k32_split" && a.impl != "wmma_fp16acc_staged_cpasync_k32_skew16" && a.impl != "wmma_fp16acc_staged_cpasync_k32_skewA16_B8" && a.impl != "wmma_fp16acc_staged_cpasync_k32_skewA8_B16" && a.impl != "wmma_fp16acc_staged_cpasync_k32_skewA24_B16" && a.impl != "wmma_fp16acc_staged_cpasync_k32_skewA8_B12" && a.impl != "wmma_fp16acc_staged_cpasync_k32_skewA8_B24" && a.impl != "wmma_fp16acc_staged_cpasync_k32_skewA8_B32" && a.impl != "wmma_fp16acc_staged_cpasync_k32_skewA16_B32" && a.impl != "wmma_fp16acc_staged_cpasync_k32_skewA24_B32" && a.impl != "cublas_gemmex_fp16acc" && a.impl != "cublaslt_fp16acc") {
+          if (a.impl != "naive" && a.impl != "tiled" && a.impl != "tiled_rb1x4" && a.impl != "tiled_rb2x4" && a.impl != "thread_tiled_1d" && a.impl != "cublas" && a.impl != "cublaslt" && a.impl != "tiled_fp16acc" && a.impl != "tiled_fp16acc_rb1x4" && a.impl != "tiled_fp16acc_rb2x4" && a.impl != "wmma_fp16acc" && a.impl != "wmma_fp16acc_staged" && a.impl != "wmma_fp16acc_staged_db" && a.impl != "wmma_fp16acc_staged_cpasync" && a.impl != "wmma_fp16acc_staged_cpasync_k32" && a.impl != "wmma_fp16acc_staged_cpasync_k32_bcol" && a.impl != "wmma_fp16acc_staged_cpasync_k32_4x2" && a.impl != "wmma_fp16acc_staged_cpasync_k32_split" && a.impl != "wmma_fp16acc_staged_cpasync_k32_skew16" && a.impl != "wmma_fp16acc_staged_cpasync_k32_skewA16_B8" && a.impl != "wmma_fp16acc_staged_cpasync_k32_skewA8_B16" && a.impl != "wmma_fp16acc_staged_cpasync_k32_skewA24_B16" && a.impl != "wmma_fp16acc_staged_cpasync_k32_skewA8_B12" && a.impl != "wmma_fp16acc_staged_cpasync_k32_skewA8_B24" && a.impl != "wmma_fp16acc_staged_cpasync_k32_skewA8_B32" && a.impl != "wmma_fp16acc_staged_cpasync_k32_skewA16_B32" && a.impl != "wmma_fp16acc_staged_cpasync_k32_skewA24_B32" && a.impl != "wmma_fp16acc_staged_cpasync_k32_4x4_skew16"  && a.impl != "wmma_fp16acc_staged_cpasync_k32_4x8_skew16" && a.impl != "wmma_fp16acc_staged_cpasync_k64" && a.impl != "wmma_fp16acc_staged_cpasync_k64_skew16" && a.impl != "wmma_fp16acc_staged_cpasync_k64_4x4_skew16" && a.impl != "wmma_fp16acc_staged_cpasync_k64_4x8_skew16" && a.impl != "cublas_gemmex_fp16acc" && a.impl != "cublaslt_fp16acc") {
           std::cerr << "Invalid --impl: " << a.impl
-                    << " (expected naive, tiled, tiled_rb1x4, tiled_rb2x4, cublas, cublaslt, tiled_fp16acc, tiled_fp16acc_rb1x4, tiled_fp16acc_rb2x4, wmma_fp16acc, wmma_fp16acc_staged, wmma_fp16acc_staged_db, wmma_fp16acc_staged_cpasync, wmma_fp16acc_staged_cpasync_k32, wmma_fp16acc_staged_cpasync_k32_bcol, wmma_fp16acc_staged_cpasync_k32_4x2, wmma_fp16acc_staged_cpasync_k32_split, wmma_fp16acc_staged_cpasync_k32_skew16, wmma_fp16acc_staged_cpasync_k32_skewA16_B8, wmma_fp16acc_staged_cpasync_k32_skewA8_B16, wmma_fp16acc_staged_cpasync_k32_skewA24_B16, wmma_fp16acc_staged_cpasync_k32_skewA8_B12, wmma_fp16acc_staged_cpasync_k32_skewA8_B24, wmma_fp16acc_staged_cpasync_k32_skewA8_B32, wmma_fp16acc_staged_cpasync_k32_skewA16_B32, wmma_fp16acc_staged_cpasync_k32_skewA24_B32, cublas_gemmex_fp16acc, or cublaslt_fp16acc)" << std::endl;
+                    << " (expected naive, tiled, tiled_rb1x4, tiled_rb2x4, thread_tiled_1d, cublas, cublaslt, tiled_fp16acc, tiled_fp16acc_rb1x4, tiled_fp16acc_rb2x4, wmma_fp16acc, wmma_fp16acc_staged, wmma_fp16acc_staged_db, wmma_fp16acc_staged_cpasync, wmma_fp16acc_staged_cpasync_k32, wmma_fp16acc_staged_cpasync_k32_bcol, wmma_fp16acc_staged_cpasync_k32_4x2, wmma_fp16acc_staged_cpasync_k32_split, wmma_fp16acc_staged_cpasync_k32_skew16, wmma_fp16acc_staged_cpasync_k32_skewA16_B8, wmma_fp16acc_staged_cpasync_k32_skewA8_B16, wmma_fp16acc_staged_cpasync_k32_skewA24_B16, wmma_fp16acc_staged_cpasync_k32_skewA8_B12, wmma_fp16acc_staged_cpasync_k32_skewA8_B24, wmma_fp16acc_staged_cpasync_k32_skewA8_B32, wmma_fp16acc_staged_cpasync_k32_skewA16_B32, wmma_fp16acc_staged_cpasync_k32_skewA24_B32, wmma_fp16acc_staged_cpasync_k32_4x4_skew16, wmma_fp16acc_staged_cpasync_k32_4x8_skew16, wmma_fp16acc_staged_cpasync_k64, wmma_fp16acc_staged_cpasync_k64_skew16, wmma_fp16acc_staged_cpasync_k64_4x4_skew16, wmma_fp16acc_staged_cpasync_k64_4x8_skew16, cublas_gemmex_fp16acc, or cublaslt_fp16acc)" << std::endl;
           std::exit(EXIT_FAILURE);
         }
     } else {
@@ -195,12 +217,6 @@ int main(int argc, char** argv) {
   fill_random(hA, 123);
   fill_random(hB, 456);
 
-  if (args.check) {
-    hC_ref.resize(static_cast<size_t>(M) * N, 0.0f);
-    std::cout << "[check] running CPU reference..." << std::endl;
-    cpu_gemm_ref(hA.data(), hB.data(), hC_ref.data(), M, N, K);
-  }
-
   bool use_fp16_inputs = (args.impl == "tiled_fp16acc" ||
                           args.impl == "tiled_fp16acc_rb1x4" ||
                           args.impl == "tiled_fp16acc_rb2x4"||
@@ -220,9 +236,32 @@ int main(int argc, char** argv) {
                           args.impl == "wmma_fp16acc_staged_cpasync_k32_skewA8_B32" ||
                           args.impl == "wmma_fp16acc_staged_cpasync_k32_skewA16_B32" ||
                           args.impl == "wmma_fp16acc_staged_cpasync_k32_skewA24_B32" ||
+                          args.impl == "wmma_fp16acc_staged_cpasync_k32_4x4_skew16" ||
+                          args.impl == "wmma_fp16acc_staged_cpasync_k32_4x8_skew16" ||
                           args.impl == "wmma_fp16acc_staged_cpasync_k64" ||
+                          args.impl == "wmma_fp16acc_staged_cpasync_k64_skew16" ||
+                          args.impl == "wmma_fp16acc_staged_cpasync_k64_4x4_skew16" ||
+                          // args.impl == "wmma_fp16acc_staged_cpasync_k64_4x8_skew16" ||
                           args.impl == "cublas_gemmex_fp16acc" ||
                           args.impl == "cublaslt_fp16acc");
+
+  if (args.check) {
+    hC_ref.resize(static_cast<size_t>(M) * N, 0.0f);
+    std::cout << "[check] running CPU reference..." << std::endl;
+    if (use_fp16_inputs) {
+      std::vector<float> hA_ref_in(hA.size());
+      std::vector<float> hB_ref_in(hB.size());
+      for (size_t i = 0; i < hA.size(); ++i) {
+        hA_ref_in[i] = __half2float(__float2half(hA[i]));
+      }
+      for (size_t i = 0; i < hB.size(); ++i) {
+        hB_ref_in[i] = __half2float(__float2half(hB[i]));
+      }
+      cpu_gemm_ref(hA_ref_in.data(), hB_ref_in.data(), hC_ref.data(), M, N, K);
+    } else {
+      cpu_gemm_ref(hA.data(), hB.data(), hC_ref.data(), M, N, K);
+    }
+  }
 
   // Device buffers
   float *dA = nullptr, *dB = nullptr, *dC = nullptr;
@@ -276,6 +315,8 @@ int main(int argc, char** argv) {
       launch_gemm_tiled_rb1x4(dA, dB, dC, M, N, K, stream);
     } else if (args.impl == "tiled_rb2x4") {
       launch_gemm_tiled_rb2x4(dA, dB, dC, M, N, K, stream);
+    } else if (args.impl == "thread_tiled_1d") {
+      launch_gemm_thread_tiled_1d(dA, dB, dC, M, N, K, stream);
     } else if (args.impl == "cublas") {
       launch_gemm_cublas_rowmajor(dA, dB, dC, M, N, K, stream);
     } else if (args.impl == "cublaslt") {
@@ -318,8 +359,20 @@ int main(int argc, char** argv) {
       launch_gemm_wmma_fp16acc_staged_cpasync_k32_skewA16_B32(dA16, dB16, dC, M, N, K, stream);
     } else if (args.impl == "wmma_fp16acc_staged_cpasync_k32_skewA24_B32") {
       launch_gemm_wmma_fp16acc_staged_cpasync_k32_skewA24_B32(dA16, dB16, dC, M, N, K, stream);
+
+    } else if (args.impl == "wmma_fp16acc_staged_cpasync_k32_4x4_skew16") {
+      launch_gemm_wmma_fp16acc_staged_cpasync_k32_4x4_skew16(dA16, dB16, dC, M, N, K, stream);
+    } else if (args.impl == "wmma_fp16acc_staged_cpasync_k32_4x8_skew16") {
+      launch_gemm_wmma_fp16acc_staged_cpasync_k32_4x8_skew16(dA16, dB16, dC, M, N, K, stream);
+
     } else if (args.impl == "wmma_fp16acc_staged_cpasync_k64") {
       launch_gemm_wmma_fp16acc_staged_cpasync_k64(dA16, dB16, dC, M, N, K, stream);
+    } else if (args.impl == "wmma_fp16acc_staged_cpasync_k64_skew16") {
+      launch_gemm_wmma_fp16acc_staged_cpasync_k64_skew16(dA16, dB16, dC, M, N, K, stream);
+    } else if (args.impl == "wmma_fp16acc_staged_cpasync_k64_4x4_skew16") {
+      launch_gemm_wmma_fp16acc_staged_cpasync_k64_4x4_skew16(dA16, dB16, dC, M, N, K, stream);
+    // } else if (args.impl == "wmma_fp16acc_staged_cpasync_k64_4x8_skew16") {
+    //   launch_gemm_wmma_fp16acc_staged_cpasync_k64_4x8_skew16(dA16, dB16, dC, M, N, K, stream);
     } else if (args.impl == "cublas_gemmex_fp16acc") {
       launch_gemm_cublas_gemmex_fp16acc_rowmajor(dA16, dB16, dC, M, N, K, stream);
     } else if (args.impl == "cublaslt_fp16acc") {
