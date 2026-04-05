@@ -61,12 +61,12 @@ PHASE1_FP16_IMPLS = [
 
 PHASE2_4090_IMPLS = [
     # "wmma_fp16acc_staged_cpasync",
-    "wmma_fp16acc_staged_cpasync_k32",
+    # "wmma_fp16acc_staged_cpasync_k32",
     # "wmma_fp16acc_staged_cpasync_k32_4x2",
     # "wmma_fp16acc_staged_cpasync_k32_split",
-    "wmma_fp16acc_staged_cpasync_k32_skew16",
-    "wmma_fp16acc_staged_cpasync_k32_4x4_skew16",
-    "wmma_fp16acc_staged_cpasync_k32_4x8_skew16",
+    # "wmma_fp16acc_staged_cpasync_k32_skew16",
+    # "wmma_fp16acc_staged_cpasync_k32_4x4_skew16",
+    # "wmma_fp16acc_staged_cpasync_k32_4x8_skew16",
     # "wmma_fp16acc_staged_cpasync_k32_skewA16_B8",
     # "wmma_fp16acc_staged_cpasync_k32_skewA8_B16",
     # "wmma_fp16acc_staged_cpasync_k32_skewA24_B16",
@@ -74,9 +74,12 @@ PHASE2_4090_IMPLS = [
     # "wmma_fp16acc_staged_cpasync_k32_skewA8_B32",
     # "wmma_fp16acc_staged_cpasync_k32_skewA16_B32",
     # "wmma_fp16acc_staged_cpasync_k32_skewA24_B32",
-    "wmma_fp16acc_staged_cpasync_k64",
+    # "wmma_fp16acc_staged_cpasync_k64",
     "wmma_fp16acc_staged_cpasync_k64_skew16",
     "wmma_fp16acc_staged_cpasync_k64_4x4_skew16",
+    # "wmma_fp16acc_staged_cpasync_k64_4x4_skew16_swizzle_n4",
+    "wmma_fp16acc_staged_cpasync_k64_4x4_skew16_prefetch",
+    "wmma_fp16acc_staged_cpasync_k64_4x4_skew16_prefetch2",
     # "wmma_fp16acc_staged_cpasync_k64_4x8_skew16",
     # "cublas_gemmex_fp16acc",
     "cublaslt_fp16acc",
@@ -233,8 +236,8 @@ if input_phase2 is not None:
     data_phase2 = parse_bench_file(input_phase2)
     phase2_sizes = collect_sizes(data_phase2, PHASE2_4090_IMPLS)
 
-    out_phase2_gflops = OUT_DIR / "gflops_phase2_4090_tc_4x8.png"
-    out_phase2_rel = OUT_DIR / "rel_to_cublaslt_phase2_4090_tc_4x8.png"
+    out_phase2_gflops = OUT_DIR / "gflops_phase2_4090_tc_prefetch2.png"
+    out_phase2_rel = OUT_DIR / "rel_to_cublaslt_phase2_4090_tc_prefetch2.png"
 
     plot_gflops(
         data_phase2,

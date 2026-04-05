@@ -21,30 +21,38 @@ add_executable(bench_gemm
   src/gemm_cublas.cu
   src/cublaslt_baseline.cu
 
+
+  src/fail/gemm_wmma_fp16acc_staged_db.cu
+  src/fail/gemm_wmma_fp16acc_staged_cpasync_k32_bcol.cu
+  src/fail/gemm_wmma_fp16acc_staged_cpasync_k32_4x2.cu
+  src/fail/gemm_wmma_fp16acc_staged_cpasync_k32_split.cu
+  src/fail/gemm_wmma_fp16acc_staged_cpasync_k32_skewA16_B8.cu
+  src/fail/gemm_wmma_fp16acc_staged_cpasync_k32_skewA8_B16.cu
+  src/fail/gemm_wmma_fp16acc_staged_cpasync_k32_skewA8_B24.cu
+  src/fail/gemm_wmma_fp16acc_staged_cpasync_k32_skewA8_B32.cu
+  src/fail/gemm_wmma_fp16acc_staged_cpasync_k32_skewA16_B32.cu
+  src/fail/gemm_wmma_fp16acc_staged_cpasync_k32_skewA24_B32.cu
+  src/fail/gemm_wmma_fp16acc_staged_cpasync_k32_skewA24_B16.cu
+  src/fail/gemm_wmma_fp16acc_staged_cpasync_k32_4x8_skew16.cu
+  src/fail/gemm_wmma_fp16acc_staged_cpasync_k64_4x4_skewA16_B32.cu
+  src/fail/gemm_wmma_fp16acc_staged_cpasync_k64_4x4_skew16_swizzle_n4.cu
+  src/fail/gemm_wmma_fp16acc_staged_cpasync_k64_4x4_skew16_swizzle2d_n4.cu
+
+
   src/gemm_tiled_fp16acc.cu
   src/gemm_tiled_fp16acc_rb1x4.cu
   src/gemm_tiled_fp16acc_rb2x4.cu
   src/gemm_wmma_fp16acc.cu
   src/gemm_wmma_fp16acc_staged.cu
-  src/gemm_wmma_fp16acc_staged_db.cu
   src/gemm_wmma_fp16acc_staged_cpasync.cu
   src/gemm_wmma_fp16acc_staged_cpasync_k32.cu
-  src/gemm_wmma_fp16acc_staged_cpasync_k32_bcol.cu
-  src/gemm_wmma_fp16acc_staged_cpasync_k32_4x2.cu
-  src/gemm_wmma_fp16acc_staged_cpasync_k32_split.cu
   src/gemm_wmma_fp16acc_staged_cpasync_k32_skew16.cu
-  src/gemm_wmma_fp16acc_staged_cpasync_k32_skewA16_B8.cu
-  src/gemm_wmma_fp16acc_staged_cpasync_k32_skewA8_B16.cu
-  src/gemm_wmma_fp16acc_staged_cpasync_k32_skewA8_B24.cu
-  src/gemm_wmma_fp16acc_staged_cpasync_k32_skewA8_B32.cu
-  src/gemm_wmma_fp16acc_staged_cpasync_k32_skewA16_B32.cu
-  src/gemm_wmma_fp16acc_staged_cpasync_k32_skewA24_B32.cu
-  src/gemm_wmma_fp16acc_staged_cpasync_k32_skewA24_B16.cu
   src/gemm_wmma_fp16acc_staged_cpasync_k32_4x4_skew16.cu
-  src/gemm_wmma_fp16acc_staged_cpasync_k32_4x8_skew16.cu
   src/gemm_wmma_fp16acc_staged_cpasync_k64.cu
   src/gemm_wmma_fp16acc_staged_cpasync_k64_skew16.cu
   src/gemm_wmma_fp16acc_staged_cpasync_k64_4x4_skew16.cu
+  src/gemm_wmma_fp16acc_staged_cpasync_k64_4x4_skew16_prefetch.cu
+  src/gemm_wmma_fp16acc_staged_cpasync_k64_4x4_skew16_prefetch2.cu
 
   src/gemm_cublas_gemmex_fp16acc.cu
   src/cublaslt_fp16acc.cu

@@ -8,6 +8,7 @@ set -euo pipefail
 #   BUILD_DIR=build WARMUP=3 REPEAT=10 bash scripts/run_bench.sh
 #   SIZES_OVERRIDE="1024 2048 4096" PROFILE_SET=phase2_4090_tc bash scripts/run_bench.sh
 #   CHECK_MAX_SIZE=256 PROFILE_SET=phase2_4090_tc bash scripts/run_bench.sh
+#   CUDA_VISIBLE_DEVICES=1 CHECK_MAX_SIZE=256 PROFILE_SET=phase2_4090_tc bash scripts/run_bench.sh
 
 BUILD_DIR="${BUILD_DIR:-build}"
 BIN="${BUILD_DIR}/bench_gemm"
@@ -68,9 +69,9 @@ case "${PROFILE_SET}" in
       # wmma_fp16acc_staged_cpasync_k32
       # wmma_fp16acc_staged_cpasync_k32_4x2
       # wmma_fp16acc_staged_cpasync_k32_split
-      wmma_fp16acc_staged_cpasync_k32_skew16
-      wmma_fp16acc_staged_cpasync_k32_4x4_skew16
-      wmma_fp16acc_staged_cpasync_k32_4x8_skew16
+      # wmma_fp16acc_staged_cpasync_k32_skew16
+      # wmma_fp16acc_staged_cpasync_k32_4x4_skew16
+      # wmma_fp16acc_staged_cpasync_k32_4x8_skew16
       # wmma_fp16acc_staged_cpasync_k32_skewA16_B8
       # wmma_fp16acc_staged_cpasync_k32_skewA8_B16
       # wmma_fp16acc_staged_cpasync_k32_skewA24_B16
@@ -80,10 +81,14 @@ case "${PROFILE_SET}" in
       # wmma_fp16acc_staged_cpasync_k32_skewA24_B32
 
       # wmma_fp16acc_staged_cpasync_k64
-      wmma_fp16acc_staged_cpasync_k64
+      # wmma_fp16acc_staged_cpasync_k64
       wmma_fp16acc_staged_cpasync_k64_skew16
       wmma_fp16acc_staged_cpasync_k64_4x4_skew16
+      # wmma_fp16acc_staged_cpasync_k64_4x4_skew16_swizzle_n4
+      wmma_fp16acc_staged_cpasync_k64_4x4_skew16_prefetch
+      wmma_fp16acc_staged_cpasync_k64_4x4_skew16_prefetch2
       # wmma_fp16acc_staged_cpasync_k64_4x8_skew16
+      # wmma_fp16acc_staged_cpasync_k64_4x4_skewA16_B32
       # cublas_gemmex_fp16acc
       cublaslt_fp16acc
     )
